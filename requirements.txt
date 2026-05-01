@@ -1,0 +1,7 @@
+openai
+pydantic
+python-dotenv
+playwright
+asyncio
+aiohttp
+sqlite3
