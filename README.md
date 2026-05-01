@@ -1,4 +1,4 @@
-# Knowledge Wiki V2
+# xWiki
 
 A standalone knowledge management and wiki generation system using LLMs and SQLite.
 
