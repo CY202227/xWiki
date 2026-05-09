@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 from datetime import datetime
 from typing import AsyncIterator, List, Dict, Any, Optional
@@ -19,7 +18,7 @@ from pydantic import BaseModel, Field
 
 # 导入搜索器和编译器
 from searcher import KnowledgeSearcher
-from compiler import KnowledgeCompiler
+from compiler import DeepKnowledgeCompiler
 from openai_client import basic_chat
 
 # --- 数据模型 ---
@@ -40,7 +39,7 @@ class WikiVerificationAgent:
         self.db_path = db_path
         self.prefix = table_prefix
         self.searcher = KnowledgeSearcher(db_path, table_prefix)
-        self.compiler = KnowledgeCompiler(db_path, table_prefix) 
+        self.compiler = DeepKnowledgeCompiler(db_path, table_prefix)
         self.client = basic_chat()
         
         # 加载模式文件
@@ -65,12 +64,12 @@ class WikiVerificationAgent:
         """主工作流：Wiki 检索 -> (多轮深度迭代) -> 最终合成"""
         
         # 1. Wiki 快速检索
-        print(f"[*] 正在检索 Wiki 共识...")
+        print("[*] 正在检索 Wiki 共识...")
         wiki_hits = self.searcher.search_wiki(user_query, limit=3)
         wiki_context = json.dumps(wiki_hits, ensure_ascii=False, indent=2)
 
         # 2. 初始文档检索 (FTS)
-        print(f"[*] 正在初探文档库...")
+        print("[*] 正在初探文档库...")
         doc_hits = self.searcher.search_documents(user_query, limit=5)
         
         # 3. 深度迭代循环 (类似 v5 的核心逻辑)
@@ -116,7 +115,7 @@ class WikiVerificationAgent:
                     if aid not in collected_ids: collected_ids.append(aid)
 
         # 4. 最终合成报告
-        print(f"[*] 正在最终合成报告...")
+        print("[*] 正在最终合成报告...")
         evidence_content = self.evidence_path.read_text(encoding="utf-8")
         
         system_prompt = f"""你是一个高级政策分析专家。请遵循【维护指南】：{self.guide_content}
@@ -145,7 +144,8 @@ class WikiVerificationAgent:
 
     async def _verify_and_backflow(self, query: str, report: str, evidence: str, source_ids: List[str]):
         """审计并写回 Wiki (共识进化)"""
-        print(f"\n[*] 正在启动知识回流核查...")
+        del query  # 问题文本已被 report 和 evidence 吸收。
+        print("\n[*] 正在启动知识回流核查...")
         try:
             resp = self.client.basic_chat_with_structured_output(
                 messages=[
@@ -163,8 +163,8 @@ class WikiVerificationAgent:
                     content=res.refined_content,
                     source_ids=source_ids
                 )
-        except Exception as e:
-            print(f"   [Error] 回流失败: {e}")
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            print(f"   [Error] 回流失败: {error}")
 
 # --- 运行示例 ---
 async def main():

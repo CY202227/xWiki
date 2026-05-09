@@ -68,9 +68,12 @@ class KnowledgeSearcher:
     def get_recent_activity(self, limit: int = 10) -> List[Dict[str, Any]]:
         """【历史感工具】：查看最近创建或更新的 Wiki 词条和审计日志"""
         with self._get_conn() as conn:
-            sql = f"SELECT event_type, description, timestamp FROM {self.prefix}_logs ORDER BY timestamp DESC LIMIT ?"
-            cur = conn.execute(sql, (limit,))
-            return [dict(row) for row in cur.fetchall()]
+            try:
+                sql = f"SELECT event_type, description, timestamp FROM {self.prefix}_logs ORDER BY timestamp DESC LIMIT ?"
+                cur = conn.execute(sql, (limit,))
+                return [dict(row) for row in cur.fetchall()]
+            except sqlite3.OperationalError:
+                return []
 
     def search_wiki(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """搜索 Wiki 实体共识（优先）"""
@@ -148,6 +151,9 @@ class KnowledgeSearcher:
 
     def read_pages(self, article_id: str, page_nos: List[int]) -> str:
         """读取指定文档的特定页码内容"""
+        if not page_nos:
+            return ""
+
         with self._get_conn() as conn:
             placeholders = ",".join(["?"] * len(page_nos))
             sql = f"SELECT page_no, content FROM {self.page_table} WHERE article_id = ? AND page_no IN ({placeholders}) ORDER BY page_no"
