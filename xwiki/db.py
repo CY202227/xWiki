@@ -10,10 +10,10 @@ from typing import Iterator, Tuple
 
 
 class XWikiSchema:
-  @staticmethod
-  def bootstrap(conn: sqlite3.Connection) -> None:
-    schema = [
-      """CREATE TABLE IF NOT EXISTS xwiki_documents (
+    @staticmethod
+    def bootstrap(conn: sqlite3.Connection) -> None:
+        schema = [
+            """CREATE TABLE IF NOT EXISTS xwiki_documents (
             document_id TEXT PRIMARY KEY,
             source_path TEXT NOT NULL,
             raw_path TEXT NOT NULL,
@@ -31,13 +31,13 @@ class XWikiSchema:
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
           )""",
-      """CREATE TABLE IF NOT EXISTS xwiki_pages (
+            """CREATE TABLE IF NOT EXISTS xwiki_pages (
             document_id TEXT NOT NULL,
             page_no INTEGER NOT NULL,
             content TEXT NOT NULL,
             PRIMARY KEY (document_id, page_no)
           )""",
-      """CREATE TABLE IF NOT EXISTS xwiki_processing_cache (
+            """CREATE TABLE IF NOT EXISTS xwiki_processing_cache (
             content_hash TEXT NOT NULL,
             page_no INTEGER NOT NULL,
             processor_version TEXT NOT NULL,
@@ -45,10 +45,10 @@ class XWikiSchema:
             created_at TEXT NOT NULL,
             PRIMARY KEY (content_hash, page_no, processor_version)
           )""",
-      """CREATE VIRTUAL TABLE IF NOT EXISTS xwiki_fts USING fts5(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS xwiki_fts USING fts5(
             document_id UNINDEXED, title, summary, raw_content, content=''
           )""",
-      """CREATE TABLE IF NOT EXISTS xwiki_entities (
+            """CREATE TABLE IF NOT EXISTS xwiki_entities (
             entity_name TEXT PRIMARY KEY,
             domain TEXT,
             consensus_summary TEXT NOT NULL,
@@ -57,68 +57,68 @@ class XWikiSchema:
             updated_at TEXT NOT NULL,
             created_at TEXT NOT NULL
           )""",
-      """CREATE TABLE IF NOT EXISTS xwiki_entity_links (
+            """CREATE TABLE IF NOT EXISTS xwiki_entity_links (
             entity_name TEXT NOT NULL,
             document_id TEXT NOT NULL,
             PRIMARY KEY (entity_name, document_id)
           )""",
-      """CREATE TABLE IF NOT EXISTS xwiki_compile_state (
+            """CREATE TABLE IF NOT EXISTS xwiki_compile_state (
             document_id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             status TEXT NOT NULL,
             error TEXT,
             updated_at TEXT NOT NULL
           )""",
-      """CREATE TABLE IF NOT EXISTS xwiki_events (
+            """CREATE TABLE IF NOT EXISTS xwiki_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_type TEXT NOT NULL,
             description TEXT NOT NULL,
             payload_json TEXT,
             created_at TEXT NOT NULL
           )""",
-      """CREATE TABLE IF NOT EXISTS xwiki_query_sessions (
+            """CREATE TABLE IF NOT EXISTS xwiki_query_sessions (
             session_id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             metadata_json TEXT
           )""",
-    ]
-    for ddl in schema:
-      conn.execute(ddl)
-    conn.commit()
+        ]
+        for ddl in schema:
+            conn.execute(ddl)
+        conn.commit()
 
 
 @dataclass(frozen=True)
 class DatabaseConfig:
-  path: Path
+    path: Path
 
-  def connect(self) -> sqlite3.Connection:
-    conn = sqlite3.connect(self.path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
-    return conn
+    def connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        return conn
 
 
 class XWikiDatabase:
-  def __init__(self, path: str | Path):
-    self.config = DatabaseConfig(Path(path).resolve())
+    def __init__(self, path: str | Path):
+        self.config = DatabaseConfig(Path(path).resolve())
 
-  @contextmanager
-  def connection(self) -> Iterator[sqlite3.Connection]:
-    conn = self.config.connect()
-    try:
-      yield conn
-    finally:
-      conn.close()
+    @contextmanager
+    def connection(self) -> Iterator[sqlite3.Connection]:
+        conn = self.config.connect()
+        try:
+            yield conn
+        finally:
+            conn.close()
 
-  def bootstrap(self) -> None:
-    with self.connection() as conn:
-      XWikiSchema.bootstrap(conn)
+    def bootstrap(self) -> None:
+        with self.connection() as conn:
+            XWikiSchema.bootstrap(conn)
 
-  def execute(self, statement: str, params: Tuple | list | None = None):
-    with self.connection() as conn:
-      cur = conn.execute(statement, params or ())
-      rows = cur.fetchall()
-      conn.commit()
-      return rows
+    def execute(self, statement: str, params: Tuple | list | None = None):
+        with self.connection() as conn:
+            cur = conn.execute(statement, params or ())
+            rows = cur.fetchall()
+            conn.commit()
+            return rows
