@@ -1,11 +1,15 @@
 # xWiki
 
-xWiki has been refactored into an importable service package. The main entrypoint is
-`XWikiService`, designed for FastAPI backends, notebooks, task runners, and other
+## About
+
+xWiki is a service-first package for building lightweight knowledge workflows on
+top of Markdown sources. It is organized around one central API, `XWikiService`,
+so you can use it in FastAPI backends, notebooks, task runners, and other
 applications.
 
-This repository no longer relies on the legacy CLI scripts such as `ingestor.py`
-or `searcher.py`; all primary flows are exposed through the service API.
+Compared with legacy versions, xWiki now exposes the full workflow through a
+service layer (`ingest`, `compile`, `ask`, `lint`) and no longer depends on
+separate command-only scripts such as `ingestor.py` or `searcher.py`.
 
 ## Capabilities
 

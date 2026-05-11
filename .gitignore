@@ -145,5 +145,4 @@ logs/
 
 OpenKB-main
 output_md
-data/wiki_v4/
-data/my_kb
+data
