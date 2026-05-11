@@ -1,11 +1,8 @@
 # xWiki
 
-xWiki has been refactored into an importable service package. The main entrypoint is
+The main entrypoint is
 `XWikiService`, designed for FastAPI backends, notebooks, task runners, and other
 applications.
-
-This repository no longer relies on the legacy CLI scripts such as `ingestor.py`
-or `searcher.py`; all primary flows are exposed through the service API.
 
 ## Capabilities
 
