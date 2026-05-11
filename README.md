@@ -83,6 +83,13 @@ from xwiki import XWikiConfig, XWikiService
 
 print(XWikiService(XWikiConfig(workspace="data/my_kb")).status())
 PY
+
+# Unified query/inspect entrypoint
+python scripts/query_service.py status --workspace data/my_kb
+python scripts/query_service.py docs "跨境人民币" --limit 5
+python scripts/query_service.py wiki "上海市" --limit 5
+python scripts/query_service.py ask "上海市有哪类对外服务政策？"
+python scripts/query_service.py log --lines 30
 ```
 
 ## Import Markdown Documents
