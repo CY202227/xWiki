@@ -23,8 +23,8 @@ SCHEMA_FILES: Dict[str, str] = {
 
 
 def ensure_contract_files(schema_dir: Path) -> None:
-  schema_dir.mkdir(parents=True, exist_ok=True)
-  for name, text in SCHEMA_FILES.items():
-    path = schema_dir / name
-    if not path.exists():
-      path.write_text(text + "\n", encoding="utf-8")
+    schema_dir.mkdir(parents=True, exist_ok=True)
+    for name, text in SCHEMA_FILES.items():
+        path = schema_dir / name
+        if not path.exists():
+            path.write_text(text + "\n", encoding="utf-8")
