@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -35,11 +35,13 @@ class XWikiConfig:
     """Strongly typed settings loaded from env vars and constructor overrides."""
 
     workspace: str = "data/my_kb"
-    llm_model: str = os.getenv("OPENAI_MODEL", "gpt-4.1")
-    llm_api_key: str = os.getenv("OPENAI_API_KEY", "")
-    llm_base_url: str = os.getenv("OPENAI_BASE_URL", "")
-    llm_timeout: int = _env_int("XWIKI_LLM_TIMEOUT", 60)
-    llm_max_retries: int = _env_int("XWIKI_LLM_MAX_RETRIES", 3)
+    llm_model: str = field(default_factory=lambda: os.getenv("MODEL_NAME") or os.getenv("OPENAI_MODEL", "gpt-4.1"))
+    llm_api_key: str = field(default_factory=lambda: os.getenv("llmAPI_KEY") or os.getenv("OPENAI_API_KEY", ""), repr=False)
+    llm_base_url: str = field(default_factory=lambda: os.getenv("API_BASE_URL") or os.getenv("OPENAI_BASE_URL", ""))
+    llm_timeout: int = field(default_factory=lambda: _env_int("XWIKI_LLM_TIMEOUT", 60))
+    llm_max_retries: int = field(default_factory=lambda: _env_int("XWIKI_LLM_MAX_RETRIES", 3))
+    llm_max_output_tokens: int = field(default_factory=lambda: _env_int("XWIKI_LLM_MAX_OUTPUT_TOKENS", 4096))
+    llm_structured_mode: str = field(default_factory=lambda: os.getenv("XWIKI_STRUCTURED_MODE", "schema"))
     db_filename: str = os.getenv("XWIKI_DB_FILENAME", "xwiki.sqlite")
     table_prefix: str = os.getenv("XWIKI_TABLE_PREFIX", "xwiki")
     ingest_concurrency: int = _env_int("XWIKI_INGEST_CONCURRENCY", 5)
@@ -61,6 +63,8 @@ class XWikiConfig:
             "llm_base_url": self.llm_base_url,
             "llm_timeout": self.llm_timeout,
             "llm_max_retries": self.llm_max_retries,
+            "llm_max_output_tokens": self.llm_max_output_tokens,
+            "llm_structured_mode": self.llm_structured_mode,
             "db_filename": self.db_filename,
             "table_prefix": self.table_prefix,
             "ingest_concurrency": self.ingest_concurrency,

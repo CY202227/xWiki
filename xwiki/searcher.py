@@ -20,15 +20,32 @@ class XWikiSearcher:
 
     @staticmethod
     def _tokenize(query: str) -> List[str]:
-        raw = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z]{2,}|[0-9]+", query)
+        raw = re.findall(r"[\u4e00-\u9fff]+|[A-Za-z0-9_]+", query.casefold())
+        expanded = []
+        stop = {"什么", "么是", "如何", "怎么", "哪些", "是否", "以及", "的"}
+        for token in raw:
+            expanded.append(token)
+            if re.fullmatch(r"[\u4e00-\u9fff]+", token) and len(token) > 2:
+                expanded.extend(token[i:i + 2] for i in range(len(token) - 1))
         seen = set()
         tokens: List[str] = []
-        for token in raw:
-            if token in seen:
+        for token in expanded:
+            if token in seen or token in stop:
                 continue
             seen.add(token)
             tokens.append(token)
-        return tokens
+        return tokens[:64]
+
+    @staticmethod
+    def _validate_query(query: str, limit: int) -> None:
+        if len(query) > 500:
+            raise ValueError("Query must not exceed 500 characters")
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+
+    @staticmethod
+    def _wildcard(token: str) -> str:
+        return "%" + token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
     def get_overview(self) -> Dict[str, Any]:
         with self._db.connection() as conn:
@@ -58,7 +75,8 @@ class XWikiSearcher:
     ) -> List[Dict[str, Any]]:
         rows = conn.execute(
             "SELECT document_id, title, summary, snippet(xwiki_fts, 3, '[', ']', '...', 40) "
-            "as context_snippet FROM xwiki_fts WHERE xwiki_fts MATCH ? LIMIT ?",
+            "as context_snippet FROM xwiki_fts WHERE xwiki_fts MATCH ? "
+            "ORDER BY bm25(xwiki_fts), document_id LIMIT ?",
             (query, limit),
         ).fetchall()
         return [dict(row) for row in rows]
@@ -69,26 +87,36 @@ class XWikiSearcher:
         if not tokens:
             return []
         terms = []
-        params: List[str] = []
+        scores = []
+        params = []
+        score_params = []
         for token in tokens:
-            wildcard = f"%{token}%"
-            terms.append("(title LIKE ? OR summary LIKE ?)")
-            params.extend([wildcard, wildcard])
-        params.append(limit)
-        sql = f"SELECT document_id, title, doc_type, summary as context_snippet FROM xwiki_documents WHERE {' OR '.join(terms)} LIMIT ?"
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+            wildcard = self._wildcard(token)
+            match = "(d.title LIKE ? ESCAPE '\\' OR d.summary LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM xwiki_pages p WHERE p.document_id=d.document_id AND p.content LIKE ? ESCAPE '\\'))"
+            terms.append(match)
+            scores.append("(CASE WHEN d.title LIKE ? ESCAPE '\\' THEN 5 ELSE 0 END + CASE WHEN d.summary LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END + CASE WHEN EXISTS (SELECT 1 FROM xwiki_pages p WHERE p.document_id=d.document_id AND p.content LIKE ? ESCAPE '\\') THEN 1 ELSE 0 END)")
+            params.extend([wildcard] * 3)
+            score_params.extend([wildcard] * 3)
+        sql = f"SELECT d.document_id, d.title, d.doc_type, d.summary, ({' + '.join(scores)}) AS score FROM xwiki_documents d WHERE {' OR '.join(terms)} ORDER BY score DESC, d.document_id LIMIT ?"
+        rows = conn.execute(sql, [*score_params, *params, limit]).fetchall()
+        hits = [dict(row) for row in rows]
+        for hit in hits:
+            passages = self.document_passages(hit["document_id"], tokens, limit=1)
+            hit["context_snippet"] = passages[0]["content"] if passages else hit["summary"]
+        return hits
 
     def search_documents(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        self._validate_query(query, limit)
         tokens = self._tokenize(query)
         if not tokens:
             return []
         with self._db.connection() as conn:
             try:
-                strict = self._fts(conn, " AND ".join(tokens), limit)
+                quoted = ['"' + token.replace('"', '""') + '"' for token in tokens]
+                strict = self._fts(conn, " AND ".join(quoted), limit)
                 if strict:
                     return strict
-                broad = self._fts(conn, " OR ".join(tokens), limit)
+                broad = self._fts(conn, " OR ".join(quoted), limit)
                 if broad:
                     return broad
             except sqlite3.OperationalError as error:
@@ -96,34 +124,61 @@ class XWikiSearcher:
             return self._like(conn, tokens, limit)
 
     def search_wiki(self, query: str, limit: int = 12) -> List[Dict[str, Any]]:
+        self._validate_query(query, limit)
+        tokens = self._tokenize(query)
+        if not tokens:
+            return []
+        clauses = []
+        scores = ["CASE WHEN entity_name = ? COLLATE NOCASE THEN 50 ELSE 0 END"]
+        score_params = [query]
+        params = []
+        for token in tokens:
+            clauses.append("(entity_name LIKE ? ESCAPE '\\' OR consensus_summary LIKE ? ESCAPE '\\' OR attributes_json LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\')")
+            scores.append("(CASE WHEN entity_name LIKE ? ESCAPE '\\' THEN 5 ELSE 0 END + CASE WHEN consensus_summary LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)")
+            params.extend([self._wildcard(token)] * 5)
+            score_params.extend([self._wildcard(token)] * 2)
         with self._db.connection() as conn:
             rows = conn.execute(
-                "SELECT entity_name, domain, consensus_summary, attributes_json, source_links_json, updated_at "
-                "FROM xwiki_entities WHERE entity_name LIKE ? OR consensus_summary LIKE ? "
-                "ORDER BY updated_at DESC LIMIT ?",
-                (f"%{query}%", f"%{query}%", limit),
+                "SELECT entity_name, page_id, domain, consensus_summary, body, summary, attributes_json, source_links_json, citations_json, updated_at, "
+                f"({' + '.join(scores)}) AS score FROM xwiki_entities WHERE {' OR '.join(clauses)} "
+                "ORDER BY score DESC, entity_name LIMIT ?",
+                [*score_params, *params, limit],
             ).fetchall()
-            items = [dict(row) for row in rows]
-            if len(items) >= limit:
-                return items
-            for token in self._tokenize(query):
-                extra = conn.execute(
-                    "SELECT entity_name, domain, consensus_summary, attributes_json, source_links_json, updated_at "
-                    "FROM xwiki_entities WHERE entity_name LIKE ? OR consensus_summary LIKE ? "
-                    "ORDER BY updated_at DESC LIMIT ?",
-                    (f"%{token}%", f"%{token}%", limit - len(items)),
-                ).fetchall()
-                for row in extra:
-                    payload = dict(row)
-                    if all(e["entity_name"] != payload["entity_name"] for e in items):
-                        items.append(payload)
-                        if len(items) >= limit:
-                            return items
-            return items
+            return [dict(row) for row in rows]
+
+    def list_entities(self, domain: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
+        self._validate_query("", limit)
+        if offset < 0:
+            raise ValueError("offset must be nonnegative")
+        with self._db.connection() as conn:
+            rows = conn.execute(
+                "SELECT entity_name, page_id, domain, CASE WHEN summary='' THEN substr(consensus_summary, 1, 300) ELSE summary END AS summary, updated_at FROM xwiki_entities "
+                "WHERE (? IS NULL OR domain=?) ORDER BY entity_name LIMIT ? OFFSET ?",
+                (domain, domain, limit, offset),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def document_passages(self, document_id: str, tokens: list[str], limit: int = 2) -> list[dict]:
+        with self._db.connection() as conn:
+            rows = conn.execute(
+                "SELECT p.page_no, p.content, d.content_hash FROM xwiki_pages p JOIN xwiki_documents d "
+                "ON p.document_id=d.document_id WHERE p.document_id=? ORDER BY p.page_no", (document_id,),
+            ).fetchall()
+        ranked = sorted(rows, key=lambda row: -sum(token in row["content"].casefold() for token in tokens))
+        passages = []
+        for row in ranked[:limit]:
+            content = row["content"]
+            positions = [content.casefold().find(token) for token in tokens if token in content.casefold()]
+            start = max(0, (min(positions) if positions else 0) - 150)
+            passages.append({"document_id": document_id, "page_no": row["page_no"], "content": content[start:start + 1500], "content_hash": row["content_hash"]})
+        return passages
 
     def read_pages(self, document_id: str, page_nos: list[int]) -> str:
         if not page_nos:
             return ""
+        if len(page_nos) > 20 or any(not isinstance(page, int) or page < 1 for page in page_nos):
+            raise ValueError("Read between 1 and 20 positive page numbers per request")
+        page_nos = list(dict.fromkeys(page_nos))
         placeholders = ",".join(["?"] * len(page_nos))
         with self._db.connection() as conn:
             rows = conn.execute(
@@ -131,6 +186,8 @@ class XWikiSearcher:
                 f"AND page_no IN ({placeholders}) ORDER BY page_no",
                 [document_id] + page_nos,
             ).fetchall()
+            if len(rows) != len(page_nos):
+                raise ValueError("Source document or requested pages do not exist")
             return "\n\n".join(
                 [f"--- Page {row['page_no']} ---\n{row['content']}" for row in rows]
             )
@@ -152,6 +209,13 @@ class XWikiSearcher:
             ).fetchall()
             result = dict(entity)
             result["evidence"] = [dict(r) for r in links]
+            citations = json.loads(result.get("citations_json") or "[]")
+            verified = []
+            for citation in citations:
+                page = conn.execute("SELECT p.content, d.content_hash FROM xwiki_pages p JOIN xwiki_documents d ON p.document_id=d.document_id WHERE p.document_id=? AND p.page_no=?",
+                                    (citation["document_id"], citation["page_no"])).fetchone()
+                verified.append({**citation, "valid": bool(page and citation["quote"] in page["content"] and citation.get("content_hash") == page["content_hash"])})
+            result["citations"] = verified
             result["wiki_consensus"] = result.pop("consensus_summary")
             return result
 

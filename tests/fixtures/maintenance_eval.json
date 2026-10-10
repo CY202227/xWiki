@@ -1,0 +1,13 @@
+{
+  "name": "xwiki-maintenance-safety-v1",
+  "original": "储水箱每季度检查一次。收集的雨水只用于灌溉，不得饮用。",
+  "cases": [
+    {"id": "repeat_no_growth", "action": "update", "body": "储水箱每季度检查一次。收集的雨水只用于灌溉，不得饮用。", "allowed": true, "unchanged": true},
+    {"id": "supplement", "action": "update", "body": "储水箱每季度检查一次。收集的雨水只用于灌溉，不得饮用。过滤网每月清理一次。", "allowed": true},
+    {"id": "lost_restriction", "action": "update", "body": "储水箱每季度检查一次。过滤网每月清理一次。", "allowed": false},
+    {"id": "silent_conflict", "action": "update", "body": "储水箱每月检查一次。收集的雨水只用于灌溉，不得饮用。", "allowed": false},
+    {"id": "explicit_conflict", "action": "update", "body": "储水箱每季度检查一次。收集的雨水只用于灌溉，不得饮用。\n新来源提出：储水箱每月检查一次。两种频率存在冲突，待确认。", "allowed": true},
+    {"id": "different_title_duplicate", "action": "create", "body": "储水箱每季度检查一次。收集的雨水只用于灌溉，不得饮用。", "allowed": false},
+    {"id": "discard_old_evidence", "action": "update", "body": "储水箱每季度检查一次。收集的雨水只用于灌溉，不得饮用。过滤网每月清理一次。", "quote": "过滤网每月清理一次。", "allowed": false}
+  ]
+}

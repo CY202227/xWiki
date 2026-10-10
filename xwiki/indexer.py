@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime
 
 from .config import XWikiConfig
@@ -30,6 +31,11 @@ class SourceIndexer:
         self._state = state
         self._config = config
 
+    @property
+    def processor_version(self) -> str:
+        mode = self._config.llm_model if self._llm.has_credentials else "offline"
+        return f"{self._config.processor_version}:{mode}"
+
     async def _page_summary(
         self, page_no: int, content: str, inherited: str, doc_hash: str
     ):
@@ -39,12 +45,12 @@ class SourceIndexer:
             row = conn.execute(
                 "SELECT summary_json FROM xwiki_processing_cache "
                 "WHERE content_hash=? AND page_no=? AND processor_version=?",
-                (doc_hash, page_no, self._config.processor_version),
+                (doc_hash, page_no, self.processor_version),
             ).fetchone()
         if row:
             return PageSummaryLLM.model_validate_json(row[0])
 
-        resp = self._llm.structured(
+        resp = await asyncio.to_thread(self._llm.structured,
             messages=[
                 {
                     "role": "system",
@@ -66,7 +72,7 @@ class SourceIndexer:
                 (
                     doc_hash,
                     page_no,
-                    self._config.processor_version,
+                    self.processor_version,
                     parsed.model_dump_json(),
                     datetime.now().isoformat(),
                 ),
@@ -87,7 +93,7 @@ class SourceIndexer:
                 OutlineLLM(items=[]),
             )
         meta = (
-            self._llm.structured(
+            (await asyncio.to_thread(self._llm.structured,
                 messages=[
                     {
                         "role": "system",
@@ -99,12 +105,12 @@ class SourceIndexer:
                     },
                 ],
                 response_model=MetaEntryLLM,
-            )
+            ))
             .choices[0]
             .message.parsed
         )
         outline = (
-            self._llm.structured(
+            (await asyncio.to_thread(self._llm.structured,
                 messages=[
                     {"role": "system", "content": "生成一个简短结构化目录，不要太长。"},
                     {
@@ -113,7 +119,7 @@ class SourceIndexer:
                     },
                 ],
                 response_model=OutlineLLM,
-            )
+            ))
             .choices[0]
             .message.parsed
         )
@@ -140,6 +146,7 @@ class SourceIndexer:
 
         now = datetime.now().isoformat()
         with self._db.connection() as conn:
+            previous = conn.execute("SELECT created_at FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone()
             conn.execute(
                 "INSERT OR REPLACE INTO xwiki_documents ("
                 "document_id, source_path, raw_path, title, canonical_title, doc_date, "
@@ -159,9 +166,9 @@ class SourceIndexer:
                     outline.model_dump_json(),
                     json.dumps(page_summaries, ensure_ascii=False),
                     document.content_hash,
-                    self._config.processor_version,
+                    self.processor_version,
                     "indexed",
-                    now,
+                    previous[0] if previous else now,
                     now,
                 ),
             )
@@ -175,7 +182,11 @@ class SourceIndexer:
                     (document.document_id, page.page_no, page.content),
                 )
             conn.execute(
-                "INSERT OR REPLACE INTO xwiki_fts "
+                "DELETE FROM xwiki_fts WHERE document_id = ?",
+                (document.document_id,),
+            )
+            conn.execute(
+                "INSERT INTO xwiki_fts "
                 "(document_id, title, summary, raw_content) VALUES (?, ?, ?, ?)",
                 (document.document_id, document.title, meta.summary, document.raw_text),
             )
@@ -192,8 +203,8 @@ class SourceIndexer:
         for item in parsed_docs:
             with self._db.connection() as conn:
                 row = conn.execute(
-                    "SELECT 1 FROM xwiki_documents WHERE document_id=? AND content_hash=?",
-                    (item.document_id, item.content_hash),
+                    "SELECT 1 FROM xwiki_documents WHERE document_id=? AND content_hash=? AND processor_version=?",
+                    (item.document_id, item.content_hash, self.processor_version),
                 ).fetchone()
             if row:
                 skipped += 1

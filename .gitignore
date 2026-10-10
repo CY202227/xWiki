@@ -134,6 +134,7 @@ Thumbs.db
 
 # Project specific
 .env.local
+.env.test.local
 
 # ChromaDB
 chroma_db/

@@ -29,9 +29,17 @@ class EntityListLLM(BaseModel):
     entities: List[Dict[str, str]] = Field(default_factory=list)
 
 
+class SourceCitation(BaseModel):
+    document_id: str
+    page_no: int = Field(ge=1)
+    quote: str = Field(min_length=1)
+    content_hash: str = ""
+
+
 class ConsensusLLM(BaseModel):
     new_consensus: str = Field(description="对实体的新增或修订定义")
     key_attributes: Dict[str, str] = Field(default_factory=dict)
+    citations: List[SourceCitation] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)

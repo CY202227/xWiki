@@ -1,0 +1,18 @@
+{
+  "name": "xwiki-zh-baseline-v1",
+  "documents": [
+    {"title": "雨水收集", "body": "雨水收集系统用于收集屋顶雨水。储水箱每季度检查一次。过滤网每月清理一次。收集的雨水只用于灌溉，不得饮用。"},
+    {"title": "图书借阅", "body": "普通图书借阅期限为21天，可续借一次，续借增加7天。参考书只能在馆内阅读，不能外借。"},
+    {"title": "备份管理", "body": "服务器每天凌晨2点执行增量备份。每周日执行完整备份。备份保留30天。恢复操作前必须验证备份校验和。"},
+    {"title": "温室管理", "body": "温室白天目标温度为24摄氏度，夜间目标温度为18摄氏度。温度超过28摄氏度时开启通风。"}
+  ],
+  "cases": [
+    {"id": "frequency", "question": "雨水收集系统储水箱多久检查一次？", "titles": ["雨水收集"], "answer_groups": [["季度", "三个月", "3个月"]]},
+    {"id": "restriction", "question": "收集的雨水可以饮用吗？", "titles": ["雨水收集"], "answer_groups": [["不得饮用", "不能饮用", "不可以饮用", "不可饮用"], ["灌溉"]]},
+    {"id": "renewal", "question": "普通图书借阅期限多少天，续借增加多少天？", "titles": ["图书借阅"], "answer_groups": [["21"], ["7"]]},
+    {"id": "restore", "question": "恢复操作前必须验证什么？", "titles": ["备份管理"], "answer_groups": [["校验和"]]},
+    {"id": "threshold", "question": "温室温度超过多少度时开启通风？", "titles": ["温室管理"], "answer_groups": [["28"]]},
+    {"id": "paraphrase", "question": "借来的书能带回家阅读多久？", "titles": ["图书借阅"], "answer_groups": [["21"]]},
+    {"id": "no_evidence", "question": "火星基地氧气价格是多少？", "titles": [], "answer_groups": [], "unanswerable": true}
+  ]
+}

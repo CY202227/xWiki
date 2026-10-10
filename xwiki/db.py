@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,7 @@ class XWikiSchema:
             PRIMARY KEY (content_hash, page_no, processor_version)
           )""",
             """CREATE VIRTUAL TABLE IF NOT EXISTS xwiki_fts USING fts5(
-            document_id UNINDEXED, title, summary, raw_content, content=''
+            document_id UNINDEXED, title, summary, raw_content
           )""",
             """CREATE TABLE IF NOT EXISTS xwiki_entities (
             entity_name TEXT PRIMARY KEY,
@@ -82,10 +83,85 @@ class XWikiSchema:
             updated_at TEXT NOT NULL,
             metadata_json TEXT
           )""",
+            """CREATE TABLE IF NOT EXISTS xwiki_entity_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_name TEXT NOT NULL,
+            snapshot_json TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          )""",
+            """CREATE TABLE IF NOT EXISTS xwiki_entity_files (
+            entity_name TEXT PRIMARY KEY,
+            relative_path TEXT NOT NULL UNIQUE,
+            content_hash TEXT NOT NULL
+          )""",
+            "CREATE INDEX IF NOT EXISTS xwiki_revision_entity ON xwiki_entity_revisions(entity_name, id)",
+            "CREATE INDEX IF NOT EXISTS xwiki_link_document ON xwiki_entity_links(document_id)",
+            "CREATE INDEX IF NOT EXISTS xwiki_document_hash ON xwiki_documents(content_hash)",
+            """CREATE TABLE IF NOT EXISTS xwiki_wiki_links (
+            source_id TEXT NOT NULL, target_id TEXT NOT NULL,
+            PRIMARY KEY(source_id, target_id))""",
+            """CREATE TABLE IF NOT EXISTS xwiki_maintenance_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, subject TEXT NOT NULL,
+            fingerprint TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+            next_due TEXT NOT NULL, stability INTEGER NOT NULL DEFAULT 0,
+            run_id TEXT, claimed_at TEXT, error TEXT, plan_json TEXT,
+            UNIQUE(kind, subject))""",
         ]
         for ddl in schema:
             conn.execute(ddl)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(xwiki_compile_state)")}
+        for name in ("content_hash", "compiler_version", "run_id"):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE xwiki_compile_state ADD COLUMN {name} TEXT")
+        entity_columns = {row[1] for row in conn.execute("PRAGMA table_info(xwiki_entities)")}
+        if "citations_json" not in entity_columns:
+            conn.execute("ALTER TABLE xwiki_entities ADD COLUMN citations_json TEXT NOT NULL DEFAULT '[]'")
+        for name, definition in (("page_id", "TEXT"), ("summary", "TEXT NOT NULL DEFAULT ''"),
+                                 ("body", "TEXT NOT NULL DEFAULT ''"), ("related_json", "TEXT NOT NULL DEFAULT '[]'")):
+            if name not in entity_columns:
+                conn.execute(f"ALTER TABLE xwiki_entities ADD COLUMN {name} {definition}")
+        import uuid
+        for row in conn.execute("SELECT entity_name FROM xwiki_entities WHERE page_id IS NULL").fetchall():
+            conn.execute("UPDATE xwiki_entities SET page_id=? WHERE entity_name=?",
+                         (uuid.uuid5(uuid.NAMESPACE_URL, 'xwiki:' + row[0]).hex, row[0]))
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS xwiki_page_identity ON xwiki_entities(page_id)")
+        XWikiSchema._upgrade_fts(conn)
         conn.commit()
+
+    @staticmethod
+    def _upgrade_fts(conn: sqlite3.Connection) -> None:
+        """Rebuild legacy contentless indexes from persisted source pages."""
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'xwiki_fts'"
+        ).fetchone()[0]
+        if not re.search(r"\bcontent\s*=\s*(['\"])\1", sql, re.IGNORECASE):
+            return
+        conn.execute("SAVEPOINT upgrade_fts")
+        try:
+            conn.execute("DROP TABLE xwiki_fts")
+            conn.execute(
+                "CREATE VIRTUAL TABLE xwiki_fts USING fts5("
+                "document_id UNINDEXED, title, summary, raw_content)"
+            )
+            documents = conn.execute(
+                "SELECT document_id, title, summary FROM xwiki_documents"
+            ).fetchall()
+            for document in documents:
+                pages = conn.execute(
+                    "SELECT content FROM xwiki_pages WHERE document_id = ? ORDER BY page_no",
+                    (document[0],),
+                ).fetchall()
+                conn.execute(
+                    "INSERT INTO xwiki_fts (document_id, title, summary, raw_content) "
+                    "VALUES (?, ?, ?, ?)",
+                    (*document, "\n\n".join(page[0] for page in pages)),
+                )
+        except Exception:
+            conn.execute("ROLLBACK TO upgrade_fts")
+            conn.execute("RELEASE upgrade_fts")
+            raise
+        conn.execute("RELEASE upgrade_fts")
 
 
 @dataclass(frozen=True)
