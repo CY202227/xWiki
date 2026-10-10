@@ -1,0 +1,15 @@
+{
+  "name": "xwiki-evidence-support-v1",
+  "cases": [
+    {"id": "clipped_negation", "quote": "可以饮用。", "context": "雨水不可以饮用。", "claim": "可以饮用。", "supported": false},
+    {"id": "clipped_condition", "quote": "28摄氏度时开启通风。", "context": "温度超过28摄氏度时开启通风。", "claim": "28摄氏度时开启通风。", "supported": false},
+    {"id": "verbatim", "quote": "普通图书借阅期限为21天。", "claim": "普通图书借阅期限为21天。", "supported": true},
+    {"id": "faithful_paraphrase", "quote": "普通图书借阅期限为21天。", "claim": "普通图书可以借用21天。", "supported": true},
+    {"id": "wrong_number", "quote": "普通图书借阅期限为21天。", "claim": "普通图书可以借用31天。", "supported": false},
+    {"id": "wrong_unit", "quote": "普通图书借阅期限为21天。", "claim": "普通图书可以借用21小时。", "supported": false},
+    {"id": "reversed_prohibition", "quote": "收集的雨水只用于灌溉，不得饮用。", "claim": "收集的雨水可以饮用。", "supported": false},
+    {"id": "lost_exception", "quote": "普通图书可外借21天。参考书只能在馆内阅读，不能外借。", "claim": "所有图书均可外借21天。", "supported": false},
+    {"id": "threshold_changed", "quote": "温度超过28摄氏度时开启通风。", "claim": "温度等于28摄氏度时必须开启通风。", "supported": false},
+    {"id": "faithful_condition", "quote": "温度超过28摄氏度时开启通风。", "claim": "当温度高于28摄氏度时，应开启通风。", "supported": true}
+  ]
+}

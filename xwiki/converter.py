@@ -6,7 +6,6 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List
 
 from .images import strip_embedded_base64_images
 
@@ -42,12 +41,18 @@ class MarkdownConverter:
 
         parts = re.split(r"<!-- PAGE_(\d+) -->", raw_text)
         pages: list[ParsedPage] = []
+        seen = set()
         for i in range(1, len(parts), 2):
             try:
                 page_no = int(parts[i])
             except ValueError:
                 continue
             content = parts[i + 1] if i + 1 < len(parts) else ""
+            if page_no < 1 or page_no in seen:
+                raise ValueError("Page markers must have unique positive numbers")
+            seen.add(page_no)
+            if not pages and parts[0].strip():
+                content = parts[0].strip() + "\n\n" + content
             pages.append(ParsedPage(page_no=page_no, content=content.strip()))
         if not pages:
             pages.append(ParsedPage(page_no=1, content=raw_text.strip()))
@@ -58,7 +63,7 @@ class MarkdownConverter:
         return hashlib.md5(str(raw_path).encode("utf-8")).hexdigest()
 
     def parse_file(self, path: Path) -> ParsedDocument:
-        raw = path.read_text(encoding="utf-8", errors="replace")
+        raw = path.read_text(encoding="utf-8-sig")
         cleaned = self.clean_text(raw)
         pages = self.split_pages(cleaned)
         content_hash = hashlib.md5(cleaned.encode("utf-8")).hexdigest()

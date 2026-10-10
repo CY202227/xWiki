@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime
 
 from .config import XWikiConfig
@@ -30,6 +31,11 @@ class SourceIndexer:
         self._state = state
         self._config = config
 
+    @property
+    def processor_version(self) -> str:
+        mode = self._config.llm_model if self._llm.has_credentials else "offline"
+        return f"{self._config.processor_version}:{mode}"
+
     async def _page_summary(
         self, page_no: int, content: str, inherited: str, doc_hash: str
     ):
@@ -39,12 +45,12 @@ class SourceIndexer:
             row = conn.execute(
                 "SELECT summary_json FROM xwiki_processing_cache "
                 "WHERE content_hash=? AND page_no=? AND processor_version=?",
-                (doc_hash, page_no, self._config.processor_version),
+                (doc_hash, page_no, self.processor_version),
             ).fetchone()
         if row:
             return PageSummaryLLM.model_validate_json(row[0])
 
-        resp = self._llm.structured(
+        resp = await asyncio.to_thread(self._llm.structured,
             messages=[
                 {
                     "role": "system",
@@ -66,7 +72,7 @@ class SourceIndexer:
                 (
                     doc_hash,
                     page_no,
-                    self._config.processor_version,
+                    self.processor_version,
                     parsed.model_dump_json(),
                     datetime.now().isoformat(),
                 ),
@@ -87,7 +93,7 @@ class SourceIndexer:
                 OutlineLLM(items=[]),
             )
         meta = (
-            self._llm.structured(
+            (await asyncio.to_thread(self._llm.structured,
                 messages=[
                     {
                         "role": "system",
@@ -99,12 +105,12 @@ class SourceIndexer:
                     },
                 ],
                 response_model=MetaEntryLLM,
-            )
+            ))
             .choices[0]
             .message.parsed
         )
         outline = (
-            self._llm.structured(
+            (await asyncio.to_thread(self._llm.structured,
                 messages=[
                     {"role": "system", "content": "生成一个简短结构化目录，不要太长。"},
                     {
@@ -113,7 +119,7 @@ class SourceIndexer:
                     },
                 ],
                 response_model=OutlineLLM,
-            )
+            ))
             .choices[0]
             .message.parsed
         )
@@ -140,6 +146,20 @@ class SourceIndexer:
 
         now = datetime.now().isoformat()
         with self._db.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            previous = conn.execute("SELECT created_at, content_hash, status FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone()
+            if previous and previous["status"] != "indexed":
+                raise ValueError("Inactive source cannot be reactivated by indexing; index a new document ID")
+            changed = previous and previous["content_hash"] != document.content_hash
+            if changed:
+                from .sources import mark_affected_pages
+                snapshot = dict(conn.execute("SELECT * FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone())
+                old_pages = [dict(row) for row in conn.execute("SELECT page_no, content FROM xwiki_pages WHERE document_id=? ORDER BY page_no", (document.document_id,))]
+                conn.execute("INSERT INTO xwiki_source_versions(document_id, content_hash, document_json, pages_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                             (document.document_id, previous["content_hash"], json.dumps(snapshot, ensure_ascii=False), json.dumps(old_pages, ensure_ascii=False), now))
+                conn.execute("INSERT INTO xwiki_source_events(document_id, content_hash, status, reason, created_at) VALUES (?, ?, 'updated', 'Source reindexed with changed content', ?)",
+                             (document.document_id, document.content_hash, now))
+                mark_affected_pages(conn, document.document_id, now, {"document_id": document.document_id, "status": "updated"})
             conn.execute(
                 "INSERT OR REPLACE INTO xwiki_documents ("
                 "document_id, source_path, raw_path, title, canonical_title, doc_date, "
@@ -159,9 +179,9 @@ class SourceIndexer:
                     outline.model_dump_json(),
                     json.dumps(page_summaries, ensure_ascii=False),
                     document.content_hash,
-                    self._config.processor_version,
+                    self.processor_version,
                     "indexed",
-                    now,
+                    previous[0] if previous else now,
                     now,
                 ),
             )
@@ -175,7 +195,11 @@ class SourceIndexer:
                     (document.document_id, page.page_no, page.content),
                 )
             conn.execute(
-                "INSERT OR REPLACE INTO xwiki_fts "
+                "DELETE FROM xwiki_fts WHERE document_id = ?",
+                (document.document_id,),
+            )
+            conn.execute(
+                "INSERT INTO xwiki_fts "
                 "(document_id, title, summary, raw_content) VALUES (?, ?, ?, ?)",
                 (document.document_id, document.title, meta.summary, document.raw_text),
             )
@@ -192,8 +216,8 @@ class SourceIndexer:
         for item in parsed_docs:
             with self._db.connection() as conn:
                 row = conn.execute(
-                    "SELECT 1 FROM xwiki_documents WHERE document_id=? AND content_hash=?",
-                    (item.document_id, item.content_hash),
+                    "SELECT 1 FROM xwiki_documents WHERE document_id=? AND content_hash=? AND processor_version=?",
+                    (item.document_id, item.content_hash, self.processor_version),
                 ).fetchone()
             if row:
                 skipped += 1

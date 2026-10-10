@@ -1,0 +1,51 @@
+{
+  "generated_at_utc": "2026-10-10T05:45:55.846177+00:00",
+  "mode": "offline-scripted",
+  "model_quality_score": null,
+  "command": "python scripts/render_demo_report.py --output-dir docs/assets",
+  "stages": [
+    {
+      "source": "01-rain.md",
+      "processed": 1,
+      "changed": 1,
+      "failed": 0
+    },
+    {
+      "source": "02-compost.md",
+      "processed": 1,
+      "changed": 1,
+      "failed": 0
+    },
+    {
+      "source": "03-rain-update.md",
+      "processed": 1,
+      "changed": 1,
+      "failed": 0
+    }
+  ],
+  "article_count": 2,
+  "source_count": 3,
+  "valid_citations": 2,
+  "citation_count": 2,
+  "stable_changes": 0,
+  "cooling_pages": [
+    {
+      "stability": 1,
+      "status": "cooling"
+    },
+    {
+      "stability": 1,
+      "status": "cooling"
+    }
+  ],
+  "restored_page": {
+    "id": "df9b8f4a24dc519a82d24470714e06bf",
+    "title": "雨水收集",
+    "summary": "储水箱每季度检查一次。",
+    "body": "以下是虚构社区花园的演示规则，不是现实操作建议。 [ead71944ef4d68ea5eb9fe1aff77d278 p.1]\n雨水收集只用于浇灌观赏植物，不用于饮用。 [ead71944ef4d68ea5eb9fe1aff77d278 p.1]\n储水箱每季度检查一次。 [ead71944ef4d68ea5eb9fe1aff77d278 p.1]",
+    "domain": "园艺"
+  },
+  "revision_count_before_rollback": 2,
+  "retrieved_sources_before_rollback": 2,
+  "limitations": "Synthetic sources and scripted plans verify the workflow, not real LLM quality. Offline QA returns evidence only."
+}

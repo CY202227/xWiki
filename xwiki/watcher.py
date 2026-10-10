@@ -16,7 +16,7 @@ class InboxPoller:
         self._dir = inbox_dir
         self._on_change = on_change
         self._interval = interval
-        self._state = {}
+        self._state: dict[Path, float] = {}
 
     async def run_once(self) -> bool:
         current = {p: p.stat().st_mtime for p in self._dir.glob("*")}

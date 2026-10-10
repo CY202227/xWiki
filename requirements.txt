@@ -1,5 +1,2 @@
-openai
-pydantic
-python-dotenv
-playwright
-aiohttp
+# Compatibility entrypoint; dependency constraints live in pyproject.toml.
+-e .

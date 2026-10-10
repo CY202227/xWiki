@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .workspace import Workspace
+from .files import atomic_write
 
 
 @dataclass
@@ -31,10 +31,7 @@ class WorkspaceState:
             self._data = {}
 
     def _save(self) -> None:
-        self.workspace.paths.status_file.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write(self.workspace.paths.status_file, json.dumps(self._data, ensure_ascii=False, indent=2))
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)

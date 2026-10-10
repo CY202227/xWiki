@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+import asyncio
+import json
 
 from ..llm import XWikiLLM
 
@@ -17,17 +19,23 @@ class KnowledgeLinter:
             rows = conn.execute(
                 "SELECT entity_name, consensus_summary FROM xwiki_entities LIMIT 40"
             ).fetchall()
-        return "\n".join(
-            [f"[{row['entity_name']}] {row['consensus_summary']}" for row in rows]
-        )
+        from ..searcher import XWikiSearcher
+        searcher = XWikiSearcher(self._db)
+        records = []
+        for row in rows:
+            evidence = searcher.get_entity_evidence(row["entity_name"], limit=2)
+            originals = [searcher.document_passages(source["document_id"], searcher._tokenize(row["entity_name"]), limit=1)
+                         for source in evidence.get("evidence", [])]
+            records.append({"entity_name": row["entity_name"], "consensus": row["consensus_summary"], "citations": evidence.get("citations", []), "originals": originals})
+        return json.dumps(records, ensure_ascii=False)
 
     async def check_contradictions(self) -> Dict[str, Any]:
         candidates = self._collect_candidates()
-        if not candidates:
+        if not json.loads(candidates):
             return {"status": "skipped", "reason": "no candidates"}
         if not self._llm.has_credentials:
             return {"status": "skipped", "reason": "llm unavailable"}
-        response = self._llm.complete(
+        response = await asyncio.to_thread(self._llm.complete,
             messages=[
                 {
                     "role": "system",
@@ -38,7 +46,7 @@ class KnowledgeLinter:
         )
         return {
             "status": "ok",
-            "checked": len(candidates.splitlines()),
+            "checked": len(json.loads(candidates)),
             "report": response,
         }
 
@@ -55,7 +63,7 @@ class KnowledgeLinter:
         text = "\n".join(
             [f"{r['entity_name']}: {r['consensus_summary']}" for r in rows]
         )
-        response = self._llm.complete(
+        response = await asyncio.to_thread(self._llm.complete,
             messages=[
                 {
                     "role": "system",
