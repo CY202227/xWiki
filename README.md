@@ -9,6 +9,10 @@ traceable evidence and recoverable history. It is distributed under the [MIT lic
 - [Reproducible run and screenshot](docs/verification.md)
 - [Planned PDF/DOCX and multimodal ingestion](docs/document-ingestion-plan.md)
 - [Text PDF/DOCX ingestion and original locators](docs/document-ingestion.md)
+- [Source updates, deduplication and deletion](docs/source-lifecycle.md)
+- [Technical proposal](docs/technical-proposal.md)
+- [Implementation walkthrough](docs/implementation.md)
+- [Interview questions and answers](docs/interview-guide.md)
 
 The main entrypoint is
 `XWikiService`, designed for FastAPI backends, notebooks, task runners, and other

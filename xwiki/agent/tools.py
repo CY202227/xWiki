@@ -69,3 +69,16 @@ class MaintenanceTools(QueryTools):
 
     def retry_maintenance_task(self, task_id: int, fingerprint: str) -> dict:
         return self._service.retry_maintenance_task(task_id, fingerprint)
+
+    async def update_source(self, document_id: str, input_path: str, **kwargs) -> dict:
+        return await self._service.update_source(document_id, input_path, **kwargs)
+
+    def delete_source(self, document_id: str, **kwargs) -> dict:
+        """Explicit authorized lifecycle action; never inferred from source text."""
+        return self._service.delete_source(document_id, **kwargs)
+
+    def source_history(self, document_id: str) -> list[dict]:
+        return self._service.source_history(document_id)
+
+    def source_versions(self, document_id: str) -> list[dict]:
+        return self._service.source_versions(document_id)

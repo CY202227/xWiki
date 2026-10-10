@@ -41,7 +41,7 @@ class SourceIndexer:
         return self.processor_version + (f":{conversion['converter']}:{conversion['version']}:locators-v1" if conversion else "")
 
     async def _page_summary(
-        self, page_no: int, content: str, inherited: str, doc_hash: str
+        self, page_no: int, content: str, inherited: str, doc_hash: str, version: str
     ):
         if not self._llm.has_credentials:
             return PageSummaryLLM(page_summary=content[:120], last_active_key=inherited)
@@ -49,7 +49,7 @@ class SourceIndexer:
             row = conn.execute(
                 "SELECT summary_json FROM xwiki_processing_cache "
                 "WHERE content_hash=? AND page_no=? AND processor_version=?",
-                (doc_hash, page_no, self.processor_version),
+                (doc_hash, page_no, version),
             ).fetchone()
         if row:
             return PageSummaryLLM.model_validate_json(row[0])
@@ -76,7 +76,7 @@ class SourceIndexer:
                 (
                     doc_hash,
                     page_no,
-                    self.processor_version,
+                    version,
                     parsed.model_dump_json(),
                     datetime.now().isoformat(),
                 ),
@@ -129,7 +129,8 @@ class SourceIndexer:
         )
         return meta, outline
 
-    async def index(self, document: ParsedDocument) -> None:
+    async def index(self, document: ParsedDocument, *, expected_hash: str | None = None,
+                    reason: str = "Source reindexed with changed content", reject_duplicate: bool = False) -> None:
         page_summaries = []
         merged_summary = ""
         last_key = ""
@@ -139,6 +140,7 @@ class SourceIndexer:
                 page.content,
                 inherited=last_key,
                 doc_hash=document.content_hash,
+                version=self.document_version(document),
             )
             merged_summary += f" [Page {page.page_no}] {summary.page_summary}"
             last_key = summary.last_active_key or last_key
@@ -152,8 +154,23 @@ class SourceIndexer:
         with self._db.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             previous = conn.execute("SELECT created_at, content_hash, status, conversion_json FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone()
+            if expected_hash is not None and (previous is None or previous["content_hash"] != expected_hash):
+                from .entities import WikiConflictError
+                raise WikiConflictError("Source changed during update; reread its hash")
             if previous and previous["status"] != "indexed":
                 raise ValueError("Inactive source cannot be reactivated by indexing; index a new document ID")
+            if reject_duplicate and expected_hash is None and previous and previous["content_hash"] != document.content_hash:
+                from .entities import WikiConflictError
+                raise WikiConflictError("Automatic ingestion cannot overwrite an existing source version")
+            if reject_duplicate:
+                duplicate = conn.execute("SELECT document_id FROM xwiki_documents WHERE content_hash=? AND document_id!=?",
+                                         (document.content_hash, document.document_id)).fetchone()
+                if duplicate:
+                    raise ValueError("Content already belongs to another source; use an explicit replacement relationship")
+                historical = conn.execute("SELECT 1 FROM xwiki_source_versions WHERE content_hash=? AND document_id!=? LIMIT 1",
+                                          (document.content_hash, document.document_id)).fetchone()
+                if historical:
+                    raise ValueError("Content belongs to another historical source version")
             changed = previous and (previous["content_hash"] != document.content_hash or json.loads(previous["conversion_json"]) != document.conversion)
             if changed:
                 from .sources import mark_affected_pages
@@ -161,8 +178,8 @@ class SourceIndexer:
                 old_pages = [dict(row) for row in conn.execute("SELECT page_no, content, locator_json FROM xwiki_pages WHERE document_id=? ORDER BY page_no", (document.document_id,))]
                 conn.execute("INSERT INTO xwiki_source_versions(document_id, content_hash, document_json, pages_json, created_at) VALUES (?, ?, ?, ?, ?)",
                              (document.document_id, previous["content_hash"], json.dumps(snapshot, ensure_ascii=False), json.dumps(old_pages, ensure_ascii=False), now))
-                conn.execute("INSERT INTO xwiki_source_events(document_id, content_hash, status, reason, created_at) VALUES (?, ?, 'updated', 'Source reindexed with changed content', ?)",
-                             (document.document_id, document.content_hash, now))
+                conn.execute("INSERT INTO xwiki_source_events(document_id, content_hash, status, reason, created_at) VALUES (?, ?, 'updated', ?, ?)",
+                             (document.document_id, document.content_hash, reason, now))
                 mark_affected_pages(conn, document.document_id, now, {"document_id": document.document_id, "status": "updated"})
             conn.execute(
                 "INSERT OR REPLACE INTO xwiki_documents ("
@@ -217,17 +234,17 @@ class SourceIndexer:
             conn.commit()
         self._state.set_document_status(document.document_id, "indexed")
 
-    async def index_all(self, parsed_docs: list[ParsedDocument]) -> dict[str, int]:
+    async def index_all(self, parsed_docs: list[ParsedDocument], *, reject_duplicate: bool = False) -> dict[str, int]:
         added = skipped = 0
         for item in parsed_docs:
             with self._db.connection() as conn:
                 row = conn.execute(
-                    "SELECT 1 FROM xwiki_documents WHERE document_id=? AND content_hash=? AND processor_version=?",
+                    "SELECT 1 FROM xwiki_documents WHERE document_id=? AND content_hash=? AND processor_version=? AND status='indexed'",
                     (item.document_id, item.content_hash, self.document_version(item)),
                 ).fetchone()
             if row:
                 skipped += 1
                 continue
-            await self.index(item)
+            await self.index(item, reject_duplicate=reject_duplicate)
             added += 1
         return {"added": added, "skipped": skipped}

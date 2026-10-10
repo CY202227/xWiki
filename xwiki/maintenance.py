@@ -182,7 +182,11 @@ class WikiMaintainer:
                 raise WikiConflictError("Inbox source changed; rescan before processing")
             source = self.service.converter.parse_file(path)
             with self.service.db.connection() as conn:
-                existing = conn.execute("SELECT document_id FROM xwiki_documents WHERE content_hash=?", (source.content_hash,)).fetchone()
+                existing = conn.execute("SELECT document_id, status FROM xwiki_documents WHERE content_hash=? "
+                                        "ORDER BY CASE status WHEN 'indexed' THEN 0 ELSE 1 END LIMIT 1", (source.content_hash,)).fetchone()
+                historical = conn.execute("SELECT 1 FROM xwiki_source_versions WHERE content_hash=? LIMIT 1", (source.content_hash,)).fetchone()
+            if (existing and existing["status"] != "indexed") or (not existing and historical):
+                raise ValueError("Inactive or historical source cannot be reintroduced automatically")
             source_id = existing[0] if existing else hashlib.sha256(("source:" + source.content_hash).encode()).hexdigest()[:32]
             source = replace(source, document_id=source_id)
             context["source"] = {"document_id": source_id, "title": source.title,
@@ -385,7 +389,7 @@ class WikiMaintainer:
                     from .llm import XWikiLLM
                     offline = XWikiLLM(replace(self.service.config, llm_api_key=""))
                     indexer = SourceIndexer(self.service.converter, self.service.db, offline, self.service.state, self.service.config)
-                    await indexer.index_all([archived])
+                    await indexer.index_all([archived], reject_duplicate=True)
                 result = self.service.entities.apply(changes, plan.reason) if changes else []
                 if state["source"] and plan.retain_source:
                     path = self.service.workspace.paths.inbox_dir / task["subject"]

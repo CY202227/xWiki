@@ -42,6 +42,17 @@ def main(argv: list[str] | None = None) -> int:
     transition.add_argument("--reason", required=True)
     transition.add_argument("--replacement-id")
     transition.add_argument("--preview", action="store_true")
+    deletion = commands.add_parser("delete-source")
+    deletion.add_argument("document_id")
+    deletion.add_argument("--expected-hash", required=True)
+    deletion.add_argument("--reason", required=True)
+    deletion.add_argument("--preview", action="store_true")
+    source_update = commands.add_parser("update-source")
+    source_update.add_argument("document_id")
+    source_update.add_argument("--input", required=True, help="New source file directly inside the workspace inbox")
+    source_update.add_argument("--expected-hash", required=True)
+    source_update.add_argument("--reason", required=True)
+    source_update.add_argument("--preview", action="store_true")
     for command in ("read", "revisions"):
         commands.add_parser(command).add_argument("name")
     pages = commands.add_parser("read-source")
@@ -108,6 +119,11 @@ def main(argv: list[str] | None = None) -> int:
         elif command == "transition-source":
             result = service.transition_source(args.document_id, expected_hash=args.expected_hash, reason=args.reason,
                                                replacement_id=args.replacement_id, preview=args.preview)
+        elif command == "delete-source":
+            result = service.delete_source(args.document_id, expected_hash=args.expected_hash, reason=args.reason, preview=args.preview)
+        elif command == "update-source":
+            result = asyncio.run(service.update_source(args.document_id, args.input, expected_hash=args.expected_hash,
+                                                      reason=args.reason, preview=args.preview))
         elif command == "read":
             result = service.read_entity(args.name)
         elif command == "read-source":

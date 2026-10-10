@@ -1,4 +1,4 @@
-"""Audited source withdrawal and immutable replacement relationships."""
+"""Audited source withdrawal, deletion and immutable replacement relationships."""
 from __future__ import annotations
 
 import json
@@ -25,17 +25,20 @@ class SourceLifecycle:
         self.db = db
 
     def transition(self, document_id: str, *, expected_hash: str, reason: str,
-                   replacement_id: str | None = None, preview: bool = False) -> dict:
+                   replacement_id: str | None = None, preview: bool = False, delete: bool = False) -> dict:
         if not expected_hash or not reason.strip() or len(reason) > 1000:
             raise ValueError("Expected source hash and a reason of 1-1000 characters are required")
-        status = "superseded" if replacement_id else "withdrawn"
+        if delete and replacement_id:
+            raise ValueError("Deletion cannot also specify a replacement")
+        status = "deleted" if delete else ("superseded" if replacement_id else "withdrawn")
         timestamp = datetime.now(timezone.utc).isoformat()
         with self.db.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             source = conn.execute("SELECT * FROM xwiki_documents WHERE document_id=?", (document_id,)).fetchone()
             if source is None:
                 raise KeyError("Source not found")
-            if source["content_hash"] != expected_hash or source["status"] != "indexed":
+            allowed = {"indexed", "withdrawn", "superseded"} if delete else {"indexed"}
+            if source["content_hash"] != expected_hash or source["status"] not in allowed:
                 raise WikiConflictError("Source changed or is already inactive; reread its status")
             if replacement_id:
                 replacement = conn.execute("SELECT status FROM xwiki_documents WHERE document_id=?", (replacement_id,)).fetchone()
@@ -50,6 +53,13 @@ class SourceLifecycle:
             if preview:
                 conn.rollback()
                 return result
+            if delete:
+                snapshot_pages = [dict(row) for row in conn.execute(
+                    "SELECT page_no, content, locator_json FROM xwiki_pages WHERE document_id=? ORDER BY page_no", (document_id,))]
+                conn.execute("INSERT INTO xwiki_source_versions(document_id, content_hash, document_json, pages_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                             (document_id, expected_hash, json.dumps(dict(source), ensure_ascii=False), json.dumps(snapshot_pages, ensure_ascii=False), timestamp))
+                conn.execute("DELETE FROM xwiki_pages WHERE document_id=?", (document_id,))
+                conn.execute("DELETE FROM xwiki_fts WHERE document_id=?", (document_id,))
             conn.execute("UPDATE xwiki_documents SET status=?, updated_at=? WHERE document_id=?", (status, timestamp, document_id))
             conn.execute("INSERT INTO xwiki_source_events(document_id, content_hash, status, replacement_id, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                          (document_id, expected_hash, status, replacement_id, reason, timestamp))

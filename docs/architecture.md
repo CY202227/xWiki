@@ -22,7 +22,7 @@ flowchart TD
     Queue --> Plan
     Plan --> LLM
     Evidence --> LLM
-    Service --> Lifecycle[来源更新 / 撤回 / 替代]
+    Service --> Lifecycle[来源更新 / 去重 / 撤回 / 替代 / 删除]
     Lifecycle --> DB
     Lifecycle --> Review[受影响页面进入审查]
     Review --> Queue
