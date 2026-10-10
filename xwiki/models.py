@@ -34,6 +34,7 @@ class SourceCitation(BaseModel):
     page_no: int = Field(ge=1)
     quote: str = Field(min_length=1)
     content_hash: str = ""
+    locator: dict[str, Any] = Field(default_factory=dict)
 
 
 class ConsensusLLM(BaseModel):

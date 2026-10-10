@@ -57,7 +57,7 @@ def test_legacy_index_is_rebuilt_from_sources_in_page_order():
             "VALUES ('doc', 'raw/report.md', 'raw/report.md', 'Report', 'Overview', 'now', 'now')"
         )
         conn.executemany(
-            "INSERT INTO xwiki_pages VALUES (?, ?, ?)",
+            "INSERT INTO xwiki_pages (document_id, page_no, content) VALUES (?, ?, ?)",
             [("doc", 2, "second quasar"), ("doc", 1, "first")],
         )
         conn.execute("DROP TABLE xwiki_fts")

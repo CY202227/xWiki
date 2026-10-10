@@ -36,6 +36,10 @@ class SourceIndexer:
         mode = self._config.llm_model if self._llm.has_credentials else "offline"
         return f"{self._config.processor_version}:{mode}"
 
+    def document_version(self, document: ParsedDocument) -> str:
+        conversion = document.conversion
+        return self.processor_version + (f":{conversion['converter']}:{conversion['version']}:locators-v1" if conversion else "")
+
     async def _page_summary(
         self, page_no: int, content: str, inherited: str, doc_hash: str
     ):
@@ -147,14 +151,14 @@ class SourceIndexer:
         now = datetime.now().isoformat()
         with self._db.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            previous = conn.execute("SELECT created_at, content_hash, status FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone()
+            previous = conn.execute("SELECT created_at, content_hash, status, conversion_json FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone()
             if previous and previous["status"] != "indexed":
                 raise ValueError("Inactive source cannot be reactivated by indexing; index a new document ID")
-            changed = previous and previous["content_hash"] != document.content_hash
+            changed = previous and (previous["content_hash"] != document.content_hash or json.loads(previous["conversion_json"]) != document.conversion)
             if changed:
                 from .sources import mark_affected_pages
                 snapshot = dict(conn.execute("SELECT * FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone())
-                old_pages = [dict(row) for row in conn.execute("SELECT page_no, content FROM xwiki_pages WHERE document_id=? ORDER BY page_no", (document.document_id,))]
+                old_pages = [dict(row) for row in conn.execute("SELECT page_no, content, locator_json FROM xwiki_pages WHERE document_id=? ORDER BY page_no", (document.document_id,))]
                 conn.execute("INSERT INTO xwiki_source_versions(document_id, content_hash, document_json, pages_json, created_at) VALUES (?, ?, ?, ?, ?)",
                              (document.document_id, previous["content_hash"], json.dumps(snapshot, ensure_ascii=False), json.dumps(old_pages, ensure_ascii=False), now))
                 conn.execute("INSERT INTO xwiki_source_events(document_id, content_hash, status, reason, created_at) VALUES (?, ?, 'updated', 'Source reindexed with changed content', ?)",
@@ -179,7 +183,7 @@ class SourceIndexer:
                     outline.model_dump_json(),
                     json.dumps(page_summaries, ensure_ascii=False),
                     document.content_hash,
-                    self.processor_version,
+                    self.document_version(document),
                     "indexed",
                     previous[0] if previous else now,
                     now,
@@ -191,8 +195,8 @@ class SourceIndexer:
             )
             for page in document.pages:
                 conn.execute(
-                    "INSERT INTO xwiki_pages (document_id, page_no, content) VALUES (?, ?, ?)",
-                    (document.document_id, page.page_no, page.content),
+                    "INSERT INTO xwiki_pages (document_id, page_no, content, locator_json) VALUES (?, ?, ?, ?)",
+                    (document.document_id, page.page_no, page.content, json.dumps(page.locator, ensure_ascii=False)),
                 )
             conn.execute(
                 "DELETE FROM xwiki_fts WHERE document_id = ?",
@@ -208,6 +212,8 @@ class SourceIndexer:
                 "(document_id, title, status, error, updated_at) VALUES (?, ?, ?, ?, ?)",
                 (document.document_id, document.title, "indexed", None, now),
             )
+            conn.execute("UPDATE xwiki_documents SET conversion_json=? WHERE document_id=?",
+                         (json.dumps(document.conversion, ensure_ascii=False), document.document_id))
             conn.commit()
         self._state.set_document_status(document.document_id, "indexed")
 
@@ -217,7 +223,7 @@ class SourceIndexer:
             with self._db.connection() as conn:
                 row = conn.execute(
                     "SELECT 1 FROM xwiki_documents WHERE document_id=? AND content_hash=? AND processor_version=?",
-                    (item.document_id, item.content_hash, self.processor_version),
+                    (item.document_id, item.content_hash, self.document_version(item)),
                 ).fetchone()
             if row:
                 skipped += 1

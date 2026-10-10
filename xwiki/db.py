@@ -110,6 +110,12 @@ class XWikiSchema:
         ]
         for ddl in schema:
             conn.execute(ddl)
+        page_columns = {row[1] for row in conn.execute("PRAGMA table_info(xwiki_pages)")}
+        if "locator_json" not in page_columns:
+            conn.execute("ALTER TABLE xwiki_pages ADD COLUMN locator_json TEXT NOT NULL DEFAULT '{}'")
+        document_columns = {row[1] for row in conn.execute("PRAGMA table_info(xwiki_documents)")}
+        if "conversion_json" not in document_columns:
+            conn.execute("ALTER TABLE xwiki_documents ADD COLUMN conversion_json TEXT NOT NULL DEFAULT '{}'")
         conn.execute("CREATE TABLE IF NOT EXISTS xwiki_source_events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                      "document_id TEXT NOT NULL, content_hash TEXT NOT NULL, status TEXT NOT NULL, "
                      "replacement_id TEXT, reason TEXT NOT NULL, created_at TEXT NOT NULL)")

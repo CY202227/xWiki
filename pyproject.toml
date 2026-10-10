@@ -20,6 +20,8 @@ dependencies = [
 test = ["pytest>=9.1.1,<10"]
 quality = ["ruff>=0.17,<0.18", "mypy>=1.20,<2", "pytest-cov>=7.1,<8"]
 build = ["build>=1.3,<2"]
+documents = ["markitdown[pdf,docx]>=0.1.8,<0.2", "pypdf>=6.20,<7"]
+document-test = ["python-docx>=1.2,<2", "reportlab>=4.5,<5"]
 
 [project.scripts]
 xwiki = "xwiki.__main__:main"
@@ -41,6 +43,11 @@ python_version = "3.10"
 files = ["xwiki"]
 check_untyped_defs = true
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["markitdown.*", "pypdf.*", "defusedxml.*", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [tool.coverage.run]
 source = ["xwiki"]

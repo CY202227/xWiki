@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .images import strip_embedded_base64_images
@@ -19,12 +19,14 @@ class ParsedDocument:
     content_hash: str
     pages: list["ParsedPage"]
     raw_text: str
+    conversion: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class ParsedPage:
     page_no: int
     content: str
+    locator: dict = field(default_factory=dict)
 
 
 class MarkdownConverter:
@@ -63,6 +65,9 @@ class MarkdownConverter:
         return hashlib.md5(str(raw_path).encode("utf-8")).hexdigest()
 
     def parse_file(self, path: Path) -> ParsedDocument:
+        if path.suffix.lower() in {".pdf", ".docx"}:
+            from .documents import convert_document
+            return convert_document(path)
         raw = path.read_text(encoding="utf-8-sig")
         cleaned = self.clean_text(raw)
         pages = self.split_pages(cleaned)

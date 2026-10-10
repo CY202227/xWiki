@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-REFERENCE = re.compile(r"\[([^\[\]\s]+)\s+(?:p\s*[.．]?\s*)?(\d+)\]", re.IGNORECASE)
+REFERENCE = re.compile(r"\[([^\[\]\s]+)\s+(?:[ps]\s*[.．]?\s*)?(\d+)\]", re.IGNORECASE)
 
 
 def plain(text: str) -> str:

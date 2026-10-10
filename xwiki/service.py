@@ -105,7 +105,7 @@ class XWikiService:
         # Cleanup mode also preserves failed or unprocessed inputs.
         self.workspace.ensure()
         started = datetime.now().isoformat()
-        files = list(self.workspace.iter_inbox_files({"md", "txt"}))
+        files = list(self.workspace.iter_inbox_files({"md", "txt", "pdf", "docx"}))
         stats: dict[str, Any] = {"added": 0, "skipped": 0, "failed": 0, "errors": []}
         for file in files:
             if file.is_symlink():
@@ -117,7 +117,7 @@ class XWikiService:
                 with self.db.connection() as conn:
                     duplicate = conn.execute(
                         "SELECT raw_path FROM xwiki_documents WHERE content_hash=? AND processor_version=?",
-                        (parsed.content_hash, self.indexer.processor_version),
+                        (parsed.content_hash, self.indexer.document_version(parsed)),
                     ).fetchone()
                 if duplicate:
                     existing = Path(duplicate["raw_path"])
@@ -127,7 +127,9 @@ class XWikiService:
                     stats["skipped"] += 1
                 else:
                     raw = self._move_to_raw(file)
-                    archived = replace(self.converter.parse_file(raw), source_path=file, title=parsed.title)
+                    if raw.read_bytes() != initial:
+                        raise ValueError("Archived bytes differ from the original input")
+                    archived = replace(parsed, document_id=self.converter.build_document_id(raw), raw_path=raw)
                     if archived.content_hash != parsed.content_hash:
                         raise ValueError("Source changed while being archived")
                     await self.indexer.index(archived)
