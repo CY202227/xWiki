@@ -379,6 +379,8 @@ Tests use temporary workspace fixtures, so they do not depend on your local prod
 workspace data.
 # 自动质量检查
 
+来源更新与撤回支持影响追踪、审查任务及历史保留，详见 [来源生命周期](docs/source-lifecycle.md)。
+
 公开示例见 [虚构社区花园](examples/garden/README.md)。运行 `python scripts/demo_wiki.py` 可离线复现来源摄取、文章增量维护、引用校验、检索、冷却和回滚，并保存 JSON 报告。模拟维护器的结果不代表真实模型成绩。
 
 每次推送和 PR 都运行 CI：Windows/Linux 的 Python 3.10、3.14 测试，最低 80% 语句覆盖率，以及 Ruff、完整包的基础类型检查、构建内容审计和独立 wheel 安装检查。CI 不需要模型密钥，使用离线及模拟模型测试；真实模型评估仍单独运行。

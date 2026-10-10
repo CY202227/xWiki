@@ -33,6 +33,15 @@ def main(argv: list[str] | None = None) -> int:
     sources.add_argument("--status")
     sources.add_argument("--limit", type=int, default=50)
     sources.add_argument("--offset", type=int, default=0)
+    source_history = commands.add_parser("source-history")
+    source_history.add_argument("document_id")
+    commands.add_parser("source-versions").add_argument("document_id")
+    transition = commands.add_parser("transition-source")
+    transition.add_argument("document_id")
+    transition.add_argument("--expected-hash", required=True)
+    transition.add_argument("--reason", required=True)
+    transition.add_argument("--replacement-id")
+    transition.add_argument("--preview", action="store_true")
     for command in ("read", "revisions"):
         commands.add_parser(command).add_argument("name")
     pages = commands.add_parser("read-source")
@@ -92,6 +101,13 @@ def main(argv: list[str] | None = None) -> int:
             result = service.searcher.list_entities(args.domain, args.limit, args.offset)
         elif command == "sources":
             result = service.list_documents(args.status, args.limit, args.offset)
+        elif command == "source-history":
+            result = service.source_history(args.document_id)
+        elif command == "source-versions":
+            result = service.source_versions(args.document_id)
+        elif command == "transition-source":
+            result = service.transition_source(args.document_id, expected_hash=args.expected_hash, reason=args.reason,
+                                               replacement_id=args.replacement_id, preview=args.preview)
         elif command == "read":
             result = service.read_entity(args.name)
         elif command == "read-source":

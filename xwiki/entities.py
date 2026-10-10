@@ -93,7 +93,7 @@ class EntityStore:
             raise ValueError("source_links_json must contain document IDs")
         sources = list(dict.fromkeys(sources))
         for source in sources:
-            if conn.execute("SELECT 1 FROM xwiki_documents WHERE document_id = ?", (source,)).fetchone() is None:
+            if conn.execute("SELECT 1 FROM xwiki_documents WHERE document_id = ? AND status='indexed'", (source,)).fetchone() is None:
                 raise ValueError(f"Unknown source: {source}")
         citations = []
         citation_items = json.loads(entity.get("citations_json", "[]"))

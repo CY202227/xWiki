@@ -110,6 +110,12 @@ class XWikiSchema:
         ]
         for ddl in schema:
             conn.execute(ddl)
+        conn.execute("CREATE TABLE IF NOT EXISTS xwiki_source_events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                     "document_id TEXT NOT NULL, content_hash TEXT NOT NULL, status TEXT NOT NULL, "
+                     "replacement_id TEXT, reason TEXT NOT NULL, created_at TEXT NOT NULL)")
+        conn.execute("CREATE TABLE IF NOT EXISTS xwiki_source_versions (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                     "document_id TEXT NOT NULL, content_hash TEXT NOT NULL, document_json TEXT NOT NULL, "
+                     "pages_json TEXT NOT NULL, created_at TEXT NOT NULL)")
         task_columns = {row[1] for row in conn.execute("PRAGMA table_info(xwiki_maintenance_tasks)")}
         if "failure_count" not in task_columns:
             conn.execute("ALTER TABLE xwiki_maintenance_tasks ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0")

@@ -73,6 +73,9 @@ class QueryEngine:
         locators = set()
         tokens = self._searcher._tokenize(question)
         for item in wiki_hits[:top_k]:
+            info = self._tools.get_entity_evidence(item["entity_name"], limit=2)
+            if info.get("source_issues") or any(not citation["valid"] for citation in info.get("citations", [])):
+                continue
             evidence_blocks.append(
                 {
                     "type": "wiki",
@@ -80,7 +83,6 @@ class QueryEngine:
                     "consensus": (item.get("body") or item["consensus_summary"])[:2500],
                 },
             )
-            info = self._tools.get_entity_evidence(item["entity_name"], limit=2)
             citations = [citation for citation in info.get("citations", []) if citation["valid"]][:4]
             evidence_blocks.append({"type": "evidence", "name": item["entity_name"], "citations": citations})
             for citation in citations:

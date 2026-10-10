@@ -74,7 +74,7 @@ class XWikiSearcher:
     ) -> List[Dict[str, Any]]:
         rows = conn.execute(
             "SELECT document_id, title, summary, snippet(xwiki_fts, 3, '[', ']', '...', 40) "
-            "as context_snippet FROM xwiki_fts WHERE xwiki_fts MATCH ? "
+            "as context_snippet FROM xwiki_fts WHERE xwiki_fts MATCH ? AND document_id IN (SELECT document_id FROM xwiki_documents WHERE status='indexed') "
             "ORDER BY bm25(xwiki_fts), document_id LIMIT ?",
             (query, limit),
         ).fetchall()
@@ -96,7 +96,7 @@ class XWikiSearcher:
             scores.append("(CASE WHEN d.title LIKE ? ESCAPE '\\' THEN 5 ELSE 0 END + CASE WHEN d.summary LIKE ? ESCAPE '\\' THEN 2 ELSE 0 END + CASE WHEN EXISTS (SELECT 1 FROM xwiki_pages p WHERE p.document_id=d.document_id AND p.content LIKE ? ESCAPE '\\') THEN 1 ELSE 0 END)")
             params.extend([wildcard] * 3)
             score_params.extend([wildcard] * 3)
-        sql = f"SELECT d.document_id, d.title, d.doc_type, d.summary, ({' + '.join(scores)}) AS score FROM xwiki_documents d WHERE {' OR '.join(terms)} ORDER BY score DESC, d.document_id LIMIT ?"
+        sql = f"SELECT d.document_id, d.title, d.doc_type, d.summary, ({' + '.join(scores)}) AS score FROM xwiki_documents d WHERE d.status='indexed' AND ({' OR '.join(terms)}) ORDER BY score DESC, d.document_id LIMIT ?"
         rows = conn.execute(sql, [*score_params, *params, limit]).fetchall()
         hits = [dict(row) for row in rows]
         for hit in hits:
@@ -136,14 +136,28 @@ class XWikiSearcher:
             scores.append("(CASE WHEN entity_name LIKE ? ESCAPE '\\' THEN 5 ELSE 0 END + CASE WHEN consensus_summary LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)")
             params.extend([self._wildcard(token)] * 5)
             score_params.extend([self._wildcard(token)] * 2)
-        with self._db.connection() as conn:
-            rows = conn.execute(
-                "SELECT entity_name, page_id, domain, consensus_summary, body, summary, attributes_json, source_links_json, citations_json, updated_at, "
-                f"({' + '.join(scores)}) AS score FROM xwiki_entities WHERE {' OR '.join(clauses)} "
-                "ORDER BY score DESC, entity_name LIMIT ?",
-                [*score_params, *params, limit],
-            ).fetchall()
-            return [dict(row) for row in rows]
+        current: list[dict[str, Any]] = []
+        offset = 0
+        batch_size = max(limit, 20)
+        while len(current) < limit:
+            with self._db.connection() as conn:
+                rows = conn.execute(
+                    "SELECT entity_name, page_id, domain, consensus_summary, body, summary, attributes_json, source_links_json, citations_json, updated_at, "
+                    f"({' + '.join(scores)}) AS score FROM xwiki_entities WHERE ({' OR '.join(clauses)}) AND NOT EXISTS (SELECT 1 FROM xwiki_entity_links l LEFT JOIN xwiki_documents d ON d.document_id=l.document_id WHERE l.entity_name=xwiki_entities.entity_name AND (d.document_id IS NULL OR d.status!='indexed')) "
+                    "ORDER BY score DESC, entity_name LIMIT ? OFFSET ?",
+                    [*score_params, *params, batch_size, offset],
+                ).fetchall()
+            for row in rows:
+                hit = dict(row)
+                evidence = self.get_entity_evidence(hit["entity_name"])
+                if not evidence.get("source_issues") and all(citation["valid"] for citation in evidence.get("citations", [])):
+                    current.append(hit)
+                    if len(current) == limit:
+                        break
+            if len(rows) < batch_size:
+                break
+            offset += len(rows)
+        return current
 
     def list_entities(self, domain: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
         self._validate_query("", limit)
@@ -161,7 +175,7 @@ class XWikiSearcher:
         with self._db.connection() as conn:
             rows = conn.execute(
                 "SELECT p.page_no, p.content, d.content_hash FROM xwiki_pages p JOIN xwiki_documents d "
-                "ON p.document_id=d.document_id WHERE p.document_id=? ORDER BY p.page_no", (document_id,),
+                "ON p.document_id=d.document_id WHERE p.document_id=? AND d.status='indexed' ORDER BY p.page_no", (document_id,),
             ).fetchall()
         ranked = sorted(rows, key=lambda row: -sum(token in row["content"].casefold() for token in tokens))
         passages = []
@@ -203,17 +217,25 @@ class XWikiSearcher:
                 "SELECT d.document_id, d.title, d.doc_date, d.summary "
                 "FROM xwiki_entity_links l "
                 "JOIN xwiki_documents d ON l.document_id = d.document_id "
-                "WHERE l.entity_name = ? ORDER BY d.doc_date DESC LIMIT ?",
+                "WHERE l.entity_name = ? AND d.status='indexed' ORDER BY d.doc_date DESC LIMIT ?",
                 (entity_name, limit),
             ).fetchall()
             result = dict(entity)
+            result["source_issues"] = [dict(row) for row in conn.execute(
+                "SELECT l.document_id, d.status AS source_status FROM xwiki_entity_links l LEFT JOIN xwiki_documents d "
+                "ON d.document_id=l.document_id WHERE l.entity_name=? AND (d.document_id IS NULL OR d.status!='indexed')", (entity_name,))]
+            review = conn.execute("SELECT review_json, fingerprint FROM xwiki_maintenance_tasks WHERE kind='page' AND subject=? AND status='review' "
+                                  "AND error='Source changed; reconcile article evidence'", (entity["page_id"],)).fetchone()
+            from .entities import entity_version
+            if review and review["fingerprint"] == entity_version(dict(entity)):
+                result["source_issues"].append({"review": json.loads(review[0])})
             result["evidence"] = [dict(r) for r in links]
             citations = json.loads(result.get("citations_json") or "[]")
             verified = []
             for citation in citations:
-                page = conn.execute("SELECT p.content, d.content_hash FROM xwiki_pages p JOIN xwiki_documents d ON p.document_id=d.document_id WHERE p.document_id=? AND p.page_no=?",
+                page = conn.execute("SELECT p.content, d.content_hash, d.status FROM xwiki_pages p JOIN xwiki_documents d ON p.document_id=d.document_id WHERE p.document_id=? AND p.page_no=?",
                                     (citation["document_id"], citation["page_no"])).fetchone()
-                verified.append({**citation, "valid": bool(page and citation["quote"] in page["content"] and citation.get("content_hash") == page["content_hash"])})
+                verified.append({**citation, "source_status": page["status"] if page else "missing", "valid": bool(page and page["status"] == "indexed" and citation["quote"] in page["content"] and citation.get("content_hash") == page["content_hash"])})
             result["citations"] = verified
             result["wiki_consensus"] = result.pop("consensus_summary")
             return result

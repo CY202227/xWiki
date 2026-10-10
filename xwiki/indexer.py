@@ -146,7 +146,20 @@ class SourceIndexer:
 
         now = datetime.now().isoformat()
         with self._db.connection() as conn:
-            previous = conn.execute("SELECT created_at FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone()
+            conn.execute("BEGIN IMMEDIATE")
+            previous = conn.execute("SELECT created_at, content_hash, status FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone()
+            if previous and previous["status"] != "indexed":
+                raise ValueError("Inactive source cannot be reactivated by indexing; index a new document ID")
+            changed = previous and previous["content_hash"] != document.content_hash
+            if changed:
+                from .sources import mark_affected_pages
+                snapshot = dict(conn.execute("SELECT * FROM xwiki_documents WHERE document_id=?", (document.document_id,)).fetchone())
+                old_pages = [dict(row) for row in conn.execute("SELECT page_no, content FROM xwiki_pages WHERE document_id=? ORDER BY page_no", (document.document_id,))]
+                conn.execute("INSERT INTO xwiki_source_versions(document_id, content_hash, document_json, pages_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                             (document.document_id, previous["content_hash"], json.dumps(snapshot, ensure_ascii=False), json.dumps(old_pages, ensure_ascii=False), now))
+                conn.execute("INSERT INTO xwiki_source_events(document_id, content_hash, status, reason, created_at) VALUES (?, ?, 'updated', 'Source reindexed with changed content', ?)",
+                             (document.document_id, document.content_hash, now))
+                mark_affected_pages(conn, document.document_id, now, {"document_id": document.document_id, "status": "updated"})
             conn.execute(
                 "INSERT OR REPLACE INTO xwiki_documents ("
                 "document_id, source_path, raw_path, title, canonical_title, doc_date, "

@@ -78,6 +78,9 @@ class KnowledgeCompiler:
         now = datetime.now(timezone.utc)
         with self._db.connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute("SELECT content_hash, status FROM xwiki_documents WHERE document_id=?", (doc["document_id"],)).fetchone()
+            if current is None or current["status"] != "indexed" or current["content_hash"] != doc["content_hash"]:
+                return False
             state = conn.execute("SELECT * FROM xwiki_compile_state WHERE document_id = ?", (doc["document_id"],)).fetchone()
             if state:
                 if state["status"] == "compiling":
@@ -146,7 +149,7 @@ class KnowledgeCompiler:
 
     async def run(self, force: bool = False) -> dict:
         with self._db.connection() as conn:
-            documents = [dict(row) for row in conn.execute("SELECT document_id, title, content_hash FROM xwiki_documents ORDER BY document_id")]
+            documents = [dict(row) for row in conn.execute("SELECT document_id, title, content_hash FROM xwiki_documents WHERE status='indexed' ORDER BY document_id")]
         stats: dict[str, Any] = {"documents_seen": len(documents), "documents_compiled": 0, "compiled": 0, "created": 0, "updated": 0, "skipped": 0, "failed": 0, "errors": []}
         if not self._llm.has_credentials:
             stats["skipped"] = len(documents)

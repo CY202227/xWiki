@@ -187,6 +187,8 @@ class XWikiService:
         entity = result["entity"]
         result["page"] = {"id": entity["page_id"], "title": entity["entity_name"], "summary": entity["summary"] or entity["consensus_summary"][:300],
                           "body": entity["body"] or entity["consensus_summary"], "domain": entity["domain"]}
+        evidence = self.searcher.get_entity_evidence(entity["entity_name"])
+        result["evidence_status"] = "review_required" if evidence.get("source_issues") or any(not item["valid"] for item in evidence.get("citations", [])) else "valid" if evidence.get("citations") else "uncited"
         return result
 
     def update_page(self, title: str, body: str, *, summary: str, base_version: str | None, reason: str, **kwargs: Any) -> dict:
@@ -221,12 +223,24 @@ class XWikiService:
             raise ValueError("offset must be nonnegative")
         with self.db.connection() as conn:
             rows = conn.execute(
-                "SELECT d.document_id, d.title, d.raw_path, d.content_hash, s.status, s.error "
+                "SELECT d.document_id, d.title, d.raw_path, d.content_hash, d.status AS source_status, s.status, s.error "
                 "FROM xwiki_documents d LEFT JOIN xwiki_compile_state s ON d.document_id=s.document_id "
                 "WHERE (? IS NULL OR s.status=?) ORDER BY d.document_id LIMIT ? OFFSET ?",
                 (status, status, limit, offset),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def transition_source(self, document_id: str, **kwargs: Any) -> dict:
+        from .sources import SourceLifecycle
+        return SourceLifecycle(self.db).transition(document_id, **kwargs)
+
+    def source_history(self, document_id: str) -> list[dict]:
+        from .sources import SourceLifecycle
+        return SourceLifecycle(self.db).history(document_id)
+
+    def source_versions(self, document_id: str) -> list[dict]:
+        from .sources import SourceLifecycle
+        return SourceLifecycle(self.db).versions(document_id)
 
     def update_entity(self, name: str, content: str, **kwargs: Any) -> dict:
         """Create/update with base_version, reason, optional citations and preview."""
