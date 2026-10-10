@@ -29,7 +29,10 @@ def check_artifact(path: Path) -> dict:
             raise ValueError(f"{path.name}: unexpected runtime or unsafe file")
         if wheel and parts[0] != "xwiki" and not parts[0].endswith(".dist-info"):
             raise ValueError(f"{path.name}: unexpected top-level wheel content")
-    if not wheel and not {"pyproject.toml", "tests/fixtures/wiki_eval.json", "scripts/evaluate_wiki.py"} <= set(names):
+    if not wheel and not {"pyproject.toml", "tests/fixtures/wiki_eval.json", "scripts/evaluate_wiki.py",
+                          "scripts/demo_wiki.py", "examples/garden/README.md",
+                          "examples/garden/sources/01-rain.md", "examples/garden/sources/02-compost.md",
+                          "examples/garden/sources/03-rain-update.md"} <= set(names):
         raise ValueError(f"{path.name}: source archive missing reproducibility files")
     return {"artifact": path.name, "files": len(names), "ok": True}
 
