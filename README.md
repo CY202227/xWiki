@@ -251,8 +251,15 @@ must not be interpreted as broad model maintenance accuracy.
 Tasks persist in SQLite. Stable/no-change checks increase the next interval
 from hours up to seven days; changed inputs reset source cooling. Article edits
 reschedule review, and newly created articles initially wait one hour. Failed
-tasks retry after five minutes. Running tasks use exclusive claims with a one-hour
+transient failures retry after five minutes, then ten minutes. Three consecutive
+failures suspend the task in `review`. Invalid plans, lost facts, invalid evidence,
+duplicate pages and missing inputs enter `review` immediately, preserving the
+generated plan when available. Running tasks use exclusive claims with a one-hour
 abandoned-claim timeout. `--force` bypasses cooling but never an active claim.
+It also never resumes a `review` task. Inspect `tasks`, correct the source or edit
+the article, then use `retry-task TASK_ID --fingerprint CURRENT_FINGERPRINT` for
+an explicit retry; retry regenerates and validates the plan rather than approving
+an unsafe proposal. Changed source fingerprints resume discovery automatically.
 Search and reading remain available during cooling. No background daemon or
 automatic deletion is enabled; invoke `maintain` when appropriate.
 
@@ -284,6 +291,36 @@ parameter count from an arbitrary provider alias. Retrieval remains lexical;
 no embedding provider is contacted by this workflow.
 
 ## Tests
+
+Automatic maintenance validates all quoted source text before archiving inputs,
+then reviews proposed body lines, headings and summaries against those quotes.
+The reviewer also receives up to 300 characters around each quote from the actual
+source page, so a clipped quote cannot by itself remove nearby negation or
+conditions. Context is bounded and may omit distant document-wide assumptions.
+Exact source sentences need no additional review call. Paraphrases and combined
+claims use a bounded model review (up to 24 non-verbatim units and 24,000 context
+characters), checking subjects, numbers, units, negation, conditions and exceptions.
+Explicit inline references must refer to the plan's evidence. Unsupported claims,
+missing decisions or invalid supporting IDs suspend the task before article writes.
+Reports are retained in task `review_json` alongside the proposed `plan_json`.
+This review is fallible model judgement, not proof of semantic correctness; manual
+page edits and the legacy compiler do not use this automatic maintenance gate.
+
+```bash
+python scripts/evaluate_evidence.py --env-file .env.test.local
+```
+
+This opt-in synthetic gold evaluation scores supported paraphrases and false
+claims with incorrect numbers, units, prohibitions, exceptions and thresholds.
+Provider/schema failures count as failures rather than successful rejections.
+The result is written to `data/evaluation/evidence-support.json`.
+
+`python scripts/evaluate_continuous.py` runs 25 sequential rounds with a scripted
+planner, including incremental additions, blocked destructive updates, forced
+review attempts, changed inputs, transient failure recovery, and repeated stable
+reviews. Results at `data/evaluation/continuous-maintenance.json` include call
+counts, retained facts and revision growth. This measures scheduling and write
+integrity; it does not score a real model's comprehension or editing quality.
 
 Gold-answer retrieval and question-answer evaluation uses a synthetic Chinese
 corpus with frequency, restrictions, numeric facts, paraphrases and missing

@@ -21,7 +21,12 @@ class Planner:
 
     def structured(self, messages, response_model):
         self.calls += 1
-        if response_model is ReadPlan:
+        from xwiki.evidence import EvidenceReview, ClaimDecision
+        if response_model is EvidenceReview:
+            payload = json.loads(messages[-1]["content"])
+            result = EvidenceReview(decisions=[ClaimDecision(claim_id=claim["id"], supported=True,
+                                    evidence_ids=claim["evidence_ids"], reason="模拟审查：证据支持") for claim in payload["claims"]])
+        elif response_model is ReadPlan:
             cards = json.loads(messages[-1]["content"])["cards"]
             result = ReadPlan(page_ids=[card["id"] for card in cards[:1]])
         elif self.skip:
@@ -35,7 +40,7 @@ class Planner:
                     action="update" if pages else "create", page_id=pages[0]["page"]["id"] if pages else "",
                     title=pages[0]["page"]["title"] if pages else "雨水收集", summary="屋顶雨水的收集与维护", body="## 用途\n收集屋顶雨水。\n## 维护\n每季度检查储水箱。", reason="整理来源为文章",
                     sources=[source["document_id"]], citations=[PlanCitation(document_id=source["document_id"], page_no=1,
-                    quote="伪造引用" if self.invalid else "收集屋顶雨水")])])
+                    quote="伪造引用" if self.invalid else "收集屋顶雨水。每季度检查储水箱。")])])
             else:
                 result = MaintenancePlan(reason="内容稳定，无需改写", operations=[])
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(parsed=result))])
@@ -199,6 +204,52 @@ def test_queue_claims_are_exclusive_and_new_evidence_invalidates_old_claim(servi
     current = queue.list()[0]
     assert current["fingerprint"] == "v2"
     assert current["status"] == "pending"
+
+
+def test_review_keeps_proposal_and_requires_explicit_retry(service):
+    path = prepare(service)
+    service.llm.invalid = True
+    result = asyncio.run(service.maintain(limit=1))
+    assert result["results"][0]["requires_review"]
+    task = service.maintenance_tasks()[0]
+    assert task["status"] == "review"
+    assert json.loads(task["plan_json"])["operations"]
+    calls = service.llm.calls
+    assert asyncio.run(service.maintain(force=True))["processed"] == 0
+    assert calls == service.llm.calls
+    with pytest.raises(ValueError, match="fingerprint"):
+        service.retry_maintenance_task(task["id"], "outdated")
+    service.llm.invalid = False
+    service.retry_maintenance_task(task["id"], task["fingerprint"])
+    assert asyncio.run(service.maintain(limit=1))["changed"] == 1
+    assert not path.exists()
+
+
+def test_transient_failures_back_off_then_stop_after_three_attempts(service):
+    path = prepare(service)
+
+    class UnavailablePlanner(Planner):
+        def structured(self, messages, response_model):
+            self.calls += 1
+            raise TimeoutError("temporary outage")
+
+    service.llm = UnavailablePlanner()
+    dues = []
+    for attempt in range(1, 4):
+        assert asyncio.run(service.maintain(limit=1, force=True))["failed"] == 1
+        task = service.maintenance_tasks()[0]
+        assert task["failure_count"] == attempt
+        assert task["status"] == ("review" if attempt == 3 else "failed")
+        dues.append(task["next_due"])
+        assert asyncio.run(service.maintain(limit=1))["processed"] == 0
+    assert dues == sorted(dues)
+    assert service.llm.calls == 3
+    assert asyncio.run(service.maintain(force=True))["failed"] == 0
+    assert service.llm.calls == 3
+    path.write_text("来源已更正。", encoding="utf-8")
+    service.llm = Planner(skip=True)
+    assert asyncio.run(service.maintain(limit=1))["processed"] == 1
+    assert service.maintenance_tasks()[0]["failure_count"] == 0
 
 
 def test_broken_related_page_is_rejected(service):

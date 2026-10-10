@@ -66,3 +66,6 @@ class MaintenanceTools(QueryTools):
 
     def maintenance_tasks(self, limit: int = 50) -> list[dict]:
         return self._service.maintenance_tasks(limit)
+
+    def retry_maintenance_task(self, task_id: int, fingerprint: str) -> dict:
+        return self._service.retry_maintenance_task(task_id, fingerprint)

@@ -74,7 +74,7 @@ class MaintenanceQueue:
             conn.execute(
                 "INSERT INTO xwiki_maintenance_tasks(kind, subject, fingerprint, next_due) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(kind, subject) DO UPDATE SET fingerprint=excluded.fingerprint, status='pending', "
-                "next_due=excluded.next_due, stability=0, error=NULL, run_id=NULL, claimed_at=NULL "
+                "next_due=excluded.next_due, stability=0, failure_count=0, error=NULL, plan_json=NULL, review_json=NULL, run_id=NULL, claimed_at=NULL "
                 "WHERE xwiki_maintenance_tasks.fingerprint != excluded.fingerprint",
                 (kind, subject, fingerprint, due),
             )
@@ -84,14 +84,18 @@ class MaintenanceQueue:
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
         with self.db.connection() as conn:
-            rows = conn.execute("SELECT * FROM xwiki_maintenance_tasks ORDER BY next_due, id LIMIT ?", (limit,)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM xwiki_maintenance_tasks ORDER BY "
+                "CASE status WHEN 'review' THEN 0 WHEN 'failed' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END, next_due, id LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def due(self, limit: int, force: bool = False) -> list[dict]:
         cutoff = now()
         with self.db.connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM xwiki_maintenance_tasks WHERE status != 'done' "
+                "SELECT * FROM xwiki_maintenance_tasks WHERE status NOT IN ('done', 'review') "
                 "AND (? OR next_due <= ?) "
                 "AND (status != 'running' OR claimed_at IS NULL OR claimed_at <= ?) "
                 "ORDER BY next_due, id LIMIT ?",
@@ -108,23 +112,37 @@ class MaintenanceQueue:
                 return None
             if current["status"] == "running" and current["claimed_at"] > (now() - timedelta(hours=1)).isoformat():
                 return None
-            if current["status"] == "done" or (not force and current["next_due"] > now().isoformat()):
+            if current["status"] in {"done", "review"} or (not force and current["next_due"] > now().isoformat()):
                 return None
             conn.execute("UPDATE xwiki_maintenance_tasks SET status='running', run_id=?, claimed_at=? WHERE id=?", (token, now().isoformat(), task["id"]))
             conn.commit()
         return token
 
-    def finish(self, task: dict, token: str, plan: MaintenancePlan | None, *, changed: bool = False, error: str | None = None, done: bool = False) -> None:
+    def retry(self, task_id: int, fingerprint: str) -> dict:
+        with self.db.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = conn.execute("SELECT * FROM xwiki_maintenance_tasks WHERE id=?", (task_id,)).fetchone()
+            if task is None:
+                raise KeyError(task_id)
+            if task["fingerprint"] != fingerprint or task["status"] not in {"review", "failed"}:
+                raise WikiConflictError("Retry requires the current fingerprint of a review or failed task")
+            conn.execute("UPDATE xwiki_maintenance_tasks SET status='pending', next_due=?, failure_count=0, error=NULL WHERE id=?", (now().isoformat(), task_id))
+            conn.commit()
+        return {"task_id": task_id, "status": "pending"}
+
+    def finish(self, task: dict, token: str, plan: MaintenancePlan | None, *, changed: bool = False, error: str | None = None, done: bool = False, review: bool = False, evidence_reviews=None) -> None:
         stability = 0 if changed else min(task["stability"] + 1, 8)
         # Cooling never deletes pages or sources. New evidence resets this clock.
         interval = min(3600 * (2 ** stability), 7 * 86400)
+        failures = task.get("failure_count", 0) + 1 if error else 0
         if error:
-            interval = 300
+            interval = min(300 * 2 ** min(failures - 1, 8), 86400)
+            review = review or failures >= 3
         with self.db.connection() as conn:
             conn.execute(
-                "UPDATE xwiki_maintenance_tasks SET status=?, next_due=?, stability=?, error=?, plan_json=?, run_id=NULL, claimed_at=NULL WHERE id=? AND run_id=?",
-                ("failed" if error else ("done" if done else "cooling"), (now() + timedelta(seconds=interval)).isoformat(), stability,
-                 error, plan.model_dump_json() if plan else None, task["id"], token),
+                "UPDATE xwiki_maintenance_tasks SET status=?, next_due=?, stability=?, failure_count=?, error=?, plan_json=?, review_json=?, run_id=NULL, claimed_at=NULL WHERE id=? AND run_id=?",
+                ("review" if review else ("failed" if error else ("done" if done else "cooling")), (now() + timedelta(seconds=interval)).isoformat(), stability, failures,
+                 error, plan.model_dump_json() if plan else None, json.dumps(evidence_reviews, ensure_ascii=False) if evidence_reviews is not None else None, task["id"], token),
             )
             conn.commit()
 
@@ -294,10 +312,37 @@ class WikiMaintainer:
                 for citation in operation.citations:
                     if citation.document_id == source.document_id:
                         page = next((page for page in source.pages if page.page_no == citation.page_no), None)
-                        if page is None or citation.quote not in page.content:
+                        if page is None or not citation.quote.strip() or citation.quote not in page.content:
                             raise ValueError("Incoming source citation does not match verbatim text")
+            for citation in operation.citations:
+                if source and citation.document_id == source.document_id:
+                    continue
+                with self.service.db.connection() as conn:
+                    page = conn.execute(
+                        "SELECT p.content,d.content_hash FROM xwiki_pages p JOIN xwiki_documents d "
+                        "ON p.document_id=d.document_id WHERE p.document_id=? AND p.page_no=?",
+                        (citation.document_id, citation.page_no),
+                    ).fetchone()
+                if page is None or citation.quote not in page["content"] or not citation.quote.strip():
+                    raise ValueError("Existing citation does not match verbatim source evidence")
+                if page["content_hash"] != state["source_versions"][citation.document_id]:
+                    raise WikiConflictError("Source changed before evidence review")
             changes.append({"entity": entity, "base_version": base_version})
         return changes
+
+    def evidence_contexts(self, operation: PageOperation, state: dict) -> list[str]:
+        contexts = []
+        for citation in operation.citations:
+            source = state["source"]
+            if source and citation.document_id == source.document_id:
+                content = next(page.content for page in source.pages if page.page_no == citation.page_no)
+            else:
+                with self.service.db.connection() as conn:
+                    content = conn.execute("SELECT content FROM xwiki_pages WHERE document_id=? AND page_no=?",
+                                           (citation.document_id, citation.page_no)).fetchone()[0]
+            position = content.index(citation.quote)
+            contexts.append(content[max(0, position - 300):position + len(citation.quote) + 300])
+        return contexts
 
     async def run(self, limit: int = 2, force: bool = False, preview: bool = False) -> dict:
         if not 1 <= limit <= 10:
@@ -311,11 +356,22 @@ class WikiMaintainer:
             if not preview and not token:
                 stats["skipped"] += 1
                 continue
+            plan = None
             try:
+                if task["kind"] == "page":
+                    version = self.service.read_page(task["subject"])["version"]
+                    if version != task["fingerprint"]:
+                        # An earlier source task in this batch may have updated this page.
+                        if not preview:
+                            self.queue.enqueue("page", task["subject"], version, delay=3600)
+                        stats["skipped"] += 1
+                        continue
                 plan, state = await self.plan(task)
                 changes = self._changes(plan, state)
+                from .evidence import verify_operation
+                reviews = [await verify_operation(self.service.llm, operation, self.evidence_contexts(operation, state)) for operation in plan.operations]
                 if preview:
-                    stats["results"].append({"task_id": task["id"], "preview": True, "plan": plan.model_dump()})
+                    stats["results"].append({"task_id": task["id"], "preview": True, "plan": plan.model_dump(), "evidence_reviews": reviews})
                     stats["processed"] += 1
                     continue
                 if state["source"] and plan.retain_source:
@@ -337,7 +393,7 @@ class WikiMaintainer:
                     if hashlib.sha256(path.read_bytes()).hexdigest() == task["fingerprint"]:
                         path.unlink()
                 actual_changes = sum(change.get("changed", True) for change in result)
-                self.queue.finish(task, token, plan, changed=bool(actual_changes), done=bool(state["source"] and plan.retain_source))
+                self.queue.finish(task, token, plan, changed=bool(actual_changes), done=bool(state["source"] and plan.retain_source), evidence_reviews=reviews)
                 if task["kind"] == "page":
                     # Update the fingerprint without resetting its cooling clock.
                     current_version = self.service.read_page(task["subject"])["version"]
@@ -346,12 +402,14 @@ class WikiMaintainer:
                         conn.commit()
                 stats["processed"] += 1
                 stats["changed"] += actual_changes
-                stats["results"].append({"task_id": task["id"], "reason": plan.reason, "changes": result})
+                stats["results"].append({"task_id": task["id"], "reason": plan.reason, "changes": result, "evidence_reviews": reviews})
             except Exception as error:
+                requires_review = isinstance(error, (ValueError, FileNotFoundError)) and not isinstance(error, WikiConflictError)
                 if token:
-                    self.queue.finish(task, token, None, error=str(error))
+                    self.queue.finish(task, token, plan, error=str(error), review=requires_review, evidence_reviews=getattr(error, "review", None))
                 stats["failed"] += 1
-                stats["results"].append({"task_id": task["id"], "error": str(error)})
+                stats["results"].append({"task_id": task["id"], "error": str(error),
+                                         "requires_review": requires_review or task.get("failure_count", 0) >= 2})
             except asyncio.CancelledError:
                 if token:
                     self.queue.finish(task, token, None, error="Maintenance cancelled")

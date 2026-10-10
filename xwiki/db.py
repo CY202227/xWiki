@@ -110,6 +110,11 @@ class XWikiSchema:
         ]
         for ddl in schema:
             conn.execute(ddl)
+        task_columns = {row[1] for row in conn.execute("PRAGMA table_info(xwiki_maintenance_tasks)")}
+        if "failure_count" not in task_columns:
+            conn.execute("ALTER TABLE xwiki_maintenance_tasks ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0")
+        if "review_json" not in task_columns:
+            conn.execute("ALTER TABLE xwiki_maintenance_tasks ADD COLUMN review_json TEXT")
         columns = {row[1] for row in conn.execute("PRAGMA table_info(xwiki_compile_state)")}
         for name in ("content_hash", "compiler_version", "run_id"):
             if name not in columns:

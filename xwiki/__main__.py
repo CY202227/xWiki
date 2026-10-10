@@ -51,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     maintain.add_argument("--force", action="store_true")
     maintain.add_argument("--preview", action="store_true")
     commands.add_parser("tasks")
+    retry_task = commands.add_parser("retry-task")
+    retry_task.add_argument("task_id", type=int)
+    retry_task.add_argument("--fingerprint", required=True)
     read_page = commands.add_parser("read-page")
     read_page.add_argument("page")
     write_page = commands.add_parser("write-page")
@@ -73,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
             result = asyncio.run(service.maintain(limit=args.limit, force=args.force, preview=args.preview))
         elif command == "tasks":
             result = service.maintenance_tasks()
+        elif command == "retry-task":
+            result = service.retry_maintenance_task(args.task_id, args.fingerprint)
         elif command == "read-page":
             result = service.read_page(args.page)
         elif command == "write-page":

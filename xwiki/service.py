@@ -211,6 +211,10 @@ class XWikiService:
         from .maintenance import MaintenanceQueue
         return MaintenanceQueue(self.db).list(limit)
 
+    def retry_maintenance_task(self, task_id: int, fingerprint: str) -> dict:
+        from .maintenance import MaintenanceQueue
+        return MaintenanceQueue(self.db).retry(task_id, fingerprint)
+
     def list_documents(self, status: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
         self.searcher._validate_query("", limit)
         if offset < 0:
