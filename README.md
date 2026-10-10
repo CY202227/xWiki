@@ -31,8 +31,8 @@ Runtime dependencies and version bounds are defined in `pyproject.toml`.
 `constraints-tested.txt` records the exact dependency versions verified on Windows
 with Python 3.14. Reuse that snapshot with
 `python -m pip install -c constraints-tested.txt -e ".[test,build]"`.
-It is a tested constraints snapshot, not a universal cross-platform lockfile;
-the declared Python 3.10 minimum has not yet been exercised by a CI matrix.
+It is a tested constraints snapshot, not a universal cross-platform lockfile.
+CI tests Python 3.10 and 3.14 on both Windows and Linux using the declared bounds.
 `python -m pip install -r requirements.txt` remains a compatible shortcut.
 Only the chat client, schema validation and environment loader are required;
 browser automation and HTTP server dependencies are installed by host applications
