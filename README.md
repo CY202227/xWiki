@@ -1,5 +1,14 @@
 # xWiki
 
+XWiki is a small Wiki maintained with model assistance, with full articles,
+traceable evidence and recoverable history. It is distributed under the [MIT license](LICENSE).
+
+- [Product scope and current limits](docs/scope.md)
+- [Architecture and execution paths](docs/architecture.md)
+- [Design decisions](docs/decisions.md)
+- [Reproducible run and screenshot](docs/verification.md)
+- [Planned PDF/DOCX and multimodal ingestion](docs/document-ingestion-plan.md)
+
 The main entrypoint is
 `XWikiService`, designed for FastAPI backends, notebooks, task runners, and other
 applications.

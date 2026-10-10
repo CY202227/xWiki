@@ -1,7 +1,9 @@
 include README.md WIKI_GUIDE.md requirements.txt constraints-tested.txt pytest.ini
 recursive-include tests *.py *.json
 recursive-include scripts *.py
+recursive-include scripts *.cjs
 recursive-include examples *.md
 recursive-include docs *.md
+recursive-include docs/assets *.html *.json *.png
 prune data
 global-exclude .env* __pycache__ *.py[cod]

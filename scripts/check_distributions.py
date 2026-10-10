@@ -34,6 +34,12 @@ def check_artifact(path: Path) -> dict:
                           "examples/garden/sources/01-rain.md", "examples/garden/sources/02-compost.md",
                           "examples/garden/sources/03-rain-update.md"} <= set(names):
         raise ValueError(f"{path.name}: source archive missing reproducibility files")
+    if wheel and not any(name.endswith(".dist-info/licenses/LICENSE") for name in names):
+        raise ValueError(f"{path.name}: wheel missing its license")
+    if not wheel and not {"LICENSE", "docs/scope.md", "docs/architecture.md", "docs/decisions.md",
+                          "docs/verification.md", "docs/assets/demo-report.png", "docs/assets/demo-report.json",
+                          "scripts/render_demo_report.py", "scripts/capture_demo_report.cjs"} <= set(names):
+        raise ValueError(f"{path.name}: source archive missing license or P0 documentation")
     return {"artifact": path.name, "files": len(names), "ok": True}
 
 
