@@ -1,0 +1,5 @@
+include README.md WIKI_GUIDE.md requirements.txt constraints-tested.txt pytest.ini
+recursive-include tests *.py *.json
+recursive-include scripts *.py
+prune data
+global-exclude .env* __pycache__ *.py[cod]

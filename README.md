@@ -16,9 +16,34 @@ applications.
 
 ## Installation
 
+Python 3.10 or newer is required. Create an isolated environment, then install
+the package from the repository root:
+
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+python -m pip install -e .
+python -m xwiki --help
 ```
+
+Runtime dependencies and version bounds are defined in `pyproject.toml`.
+`constraints-tested.txt` records the exact dependency versions verified on Windows
+with Python 3.14. Reuse that snapshot with
+`python -m pip install -c constraints-tested.txt -e ".[test,build]"`.
+It is a tested constraints snapshot, not a universal cross-platform lockfile;
+the declared Python 3.10 minimum has not yet been exercised by a CI matrix.
+`python -m pip install -r requirements.txt` remains a compatible shortcut.
+Only the chat client, schema validation and environment loader are required;
+browser automation and HTTP server dependencies are installed by host applications
+when needed. For tests use `python -m pip install -e ".[test]"`. For distribution
+builds use `python -m pip install ".[build]"` followed by `python -m build`.
+The installed `xwiki` shortcut calls the same entrypoint as `python -m xwiki`;
+use the module form on managed Windows machines that block generated executables.
+Builds include the `xwiki` package; private settings, runtime knowledge bases,
+evaluation outputs and tests are excluded from the installed package.
+Source archives additionally contain the tests, synthetic fixtures and evaluation
+scripts. Verify both distributions with `python scripts/check_distributions.py dist`.
 
 Set these environment variables in `.env` (or pass config values explicitly):
 
