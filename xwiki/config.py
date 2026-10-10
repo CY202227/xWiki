@@ -35,9 +35,9 @@ class XWikiConfig:
     """Strongly typed settings loaded from env vars and constructor overrides."""
 
     workspace: str = "data/my_kb"
-    llm_model: str = field(default_factory=lambda: os.getenv("MODEL_NAME") or os.getenv("OPENAI_MODEL", "gpt-4.1"))
-    llm_api_key: str = field(default_factory=lambda: os.getenv("llmAPI_KEY") or os.getenv("OPENAI_API_KEY", ""), repr=False)
-    llm_base_url: str = field(default_factory=lambda: os.getenv("API_BASE_URL") or os.getenv("OPENAI_BASE_URL", ""))
+    llm_model: str = field(default_factory=lambda: os.getenv("MODEL_NAME") or os.getenv("OPENAI_MODEL") or "gpt-4.1")
+    llm_api_key: str = field(default_factory=lambda: os.getenv("llmAPI_KEY") or os.getenv("OPENAI_API_KEY") or "", repr=False)
+    llm_base_url: str = field(default_factory=lambda: os.getenv("API_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "")
     llm_timeout: int = field(default_factory=lambda: _env_int("XWIKI_LLM_TIMEOUT", 60))
     llm_max_retries: int = field(default_factory=lambda: _env_int("XWIKI_LLM_MAX_RETRIES", 3))
     llm_max_output_tokens: int = field(default_factory=lambda: _env_int("XWIKI_LLM_MAX_OUTPUT_TOKENS", 4096))

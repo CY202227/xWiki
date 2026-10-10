@@ -92,7 +92,7 @@ def test_zero_entities_finishes_document_without_repeat(service):
 
 
 def test_compile_preserves_existing_attributes_and_read_context(service):
-    fake = prepare_compiler(service)
+    prepare_compiler(service)
     service.update_entity("概念", "旧定义", base_version=None, reason="创建", attributes={"已有": "保留"})
     result = asyncio.run(service.compile_knowledge())
     assert result.stats["updated"] == 1
@@ -101,7 +101,7 @@ def test_compile_preserves_existing_attributes_and_read_context(service):
 
 
 def test_parallel_compilers_do_not_process_source_twice(service):
-    fake = prepare_compiler(service)
+    prepare_compiler(service)
 
     async def scenario():
         return await asyncio.gather(service.compile_knowledge(), service.compile_knowledge())

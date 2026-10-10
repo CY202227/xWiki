@@ -2,13 +2,11 @@
 
 import asyncio
 import json
-from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 
-from xwiki.maintenance import MaintenancePlan, PageOperation, PlanCitation, ReadPlan, MaintenanceQueue, now
-from xwiki.models import SourceCitation
+from xwiki.maintenance import MaintenancePlan, PageOperation, PlanCitation, ReadPlan, MaintenanceQueue
 
 
 class Planner:
@@ -82,7 +80,7 @@ def test_full_article_cards_links_and_rollback(service):
     page = service.read_page("方法")
     assert page["page"]["body"].startswith("## 步骤")
     assert page["page"]["id"]
-    second = service.update_page("相关方法", "关联检查流程", summary="相关方法", base_version=None, reason="创建", related=[page["page"]["id"]])
+    service.update_page("相关方法", "关联检查流程", summary="相关方法", base_version=None, reason="创建", related=[page["page"]["id"]])
     other = service.read_page("相关方法")
     assert service.page_links(page["page"]["id"])["incoming"] == [other["page"]["id"]]
     assert service.page_cards()[0]["summary"]

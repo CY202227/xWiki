@@ -7,16 +7,15 @@ import hashlib
 import json
 import re
 import uuid
+from typing import Any
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Literal
+from typing import Literal, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .entities import WikiConflictError, entity_version
+from .entities import WikiConflictError
 from .indexer import SourceIndexer
-from .models import SourceCitation
 
 
 def now() -> datetime:
@@ -91,7 +90,7 @@ class MaintenanceQueue:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def due(self, limit: int, force: bool = False) -> list[dict]:
+    def due(self, limit: int, force: bool = False) -> List[dict]:
         cutoff = now()
         with self.db.connection() as conn:
             rows = conn.execute(
@@ -348,7 +347,7 @@ class WikiMaintainer:
         if not 1 <= limit <= 10:
             raise ValueError("Maintenance limit must be between 1 and 10")
         self.scan()
-        stats = {"processed": 0, "changed": 0, "skipped": 0, "failed": 0, "results": []}
+        stats: dict[str, Any] = {"processed": 0, "changed": 0, "skipped": 0, "failed": 0, "results": []}
         if not self.service.llm.has_credentials:
             return {**stats, "reason": "llm unavailable"}
         for task in self.queue.due(limit, force):
@@ -382,10 +381,9 @@ class WikiMaintainer:
                     raw = self.service._move_to_raw(path)
                     archived = replace(source, raw_path=raw)
 
-                    class Offline:
-                        has_credentials = False
-
-                    indexer = SourceIndexer(self.service.converter, self.service.db, Offline(), self.service.state, self.service.config)
+                    from .llm import XWikiLLM
+                    offline = XWikiLLM(replace(self.service.config, llm_api_key=""))
+                    indexer = SourceIndexer(self.service.converter, self.service.db, offline, self.service.state, self.service.config)
                     await indexer.index_all([archived])
                 result = self.service.entities.apply(changes, plan.reason) if changes else []
                 if state["source"] and plan.retain_source:
@@ -393,6 +391,7 @@ class WikiMaintainer:
                     if hashlib.sha256(path.read_bytes()).hexdigest() == task["fingerprint"]:
                         path.unlink()
                 actual_changes = sum(change.get("changed", True) for change in result)
+                assert token is not None
                 self.queue.finish(task, token, plan, changed=bool(actual_changes), done=bool(state["source"] and plan.retain_source), evidence_reviews=reviews)
                 if task["kind"] == "page":
                     # Update the fingerprint without resetting its cooling clock.

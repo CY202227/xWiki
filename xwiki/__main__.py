@@ -7,6 +7,7 @@ import asyncio
 import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
+from typing import Any
 
 from .service import XWikiService
 
@@ -65,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
             from dotenv import load_dotenv
             load_dotenv(args.env_file, override=True, encoding="utf-8-sig")
         service = XWikiService(workspace=args.workspace)
+        result: Any
         command = args.command or "status"
         if command == "status":
             result = service.status()
@@ -107,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
             result = service.rollback_entity(args.name, args.revision_id, base_version=args.base_version, reason=args.reason)
         else:
             result = service.run_structural_lint()
-        if is_dataclass(result):
+        if is_dataclass(result) and not isinstance(result, type):
             result = asdict(result)
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False))
         if isinstance(result, dict) and result.get("stats", {}).get("failed"):

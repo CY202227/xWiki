@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import asyncio
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict
 from pydantic import BaseModel, Field
 
 from ..llm import XWikiLLM, _NoCredentialsError
@@ -174,9 +174,9 @@ class QueryEngine:
             result["warnings"] = ["回答包含未知引用: " + ", ".join(invalid) if invalid else "回答未包含可验证引用"]
         if backflow:
             try:
-                item = await self._backfill_wiki(question, response)
-                if item:
-                    result["backflow_hint"] = truncate(item, 140)
+                backfill = await self._backfill_wiki(question, response)
+                if backfill:
+                    result["backflow_hint"] = truncate(backfill, 140)
             except _NoCredentialsError:
                 pass
         return result

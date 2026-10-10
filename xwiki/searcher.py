@@ -6,8 +6,7 @@ import json
 import logging
 import re
 import sqlite3
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .db import XWikiDatabase
 
@@ -184,7 +183,7 @@ class XWikiSearcher:
             rows = conn.execute(
                 f"SELECT page_no, content FROM xwiki_pages WHERE document_id = ? "
                 f"AND page_no IN ({placeholders}) ORDER BY page_no",
-                [document_id] + page_nos,
+                (document_id, *page_nos),
             ).fetchall()
             if len(rows) != len(page_nos):
                 raise ValueError("Source document or requested pages do not exist")

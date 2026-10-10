@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-import json
 import hashlib
 
 from .renderer import entity_file_name, _slugify

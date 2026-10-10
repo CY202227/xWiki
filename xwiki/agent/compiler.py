@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from typing import Any
 from datetime import datetime, timezone, timedelta
 
 from ..db import XWikiDatabase
@@ -29,7 +30,7 @@ class KnowledgeCompiler:
         self._store = EntityStore(db, workspace)
 
     async def _extract_entities(self, title: str, full_text: str, domains: list[str]):
-        found = {}
+        found: dict[str, dict[str, str]] = {}
         for start in range(0, len(full_text), 12000):
             passage = full_text[max(0, start - 500):start + 12000]
             resp = await asyncio.to_thread(
@@ -46,7 +47,7 @@ class KnowledgeCompiler:
 
     def _context(self, sources: list[str]) -> str:
         with self._db.connection() as conn:
-            blocks = []
+            blocks: list[str] = []
             for source in sources:
                 rows = conn.execute("SELECT page_no, content FROM xwiki_pages WHERE document_id = ? ORDER BY page_no", (source,)).fetchall()
                 blocks.extend(f"[document_id={source} page_no={row['page_no']}]\n{row['content']}" for row in rows)
@@ -146,7 +147,7 @@ class KnowledgeCompiler:
     async def run(self, force: bool = False) -> dict:
         with self._db.connection() as conn:
             documents = [dict(row) for row in conn.execute("SELECT document_id, title, content_hash FROM xwiki_documents ORDER BY document_id")]
-        stats = {"documents_seen": len(documents), "documents_compiled": 0, "compiled": 0, "created": 0, "updated": 0, "skipped": 0, "failed": 0, "errors": []}
+        stats: dict[str, Any] = {"documents_seen": len(documents), "documents_compiled": 0, "compiled": 0, "created": 0, "updated": 0, "skipped": 0, "failed": 0, "errors": []}
         if not self._llm.has_credentials:
             stats["skipped"] = len(documents)
             stats["reason"] = "llm unavailable"

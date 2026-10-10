@@ -106,7 +106,7 @@ class XWikiService:
         self.workspace.ensure()
         started = datetime.now().isoformat()
         files = list(self.workspace.iter_inbox_files({"md", "txt"}))
-        stats = {"added": 0, "skipped": 0, "failed": 0, "errors": []}
+        stats: dict[str, Any] = {"added": 0, "skipped": 0, "failed": 0, "errors": []}
         for file in files:
             if file.is_symlink():
                 stats["skipped"] += 1

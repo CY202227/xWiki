@@ -1,7 +1,6 @@
 """Version, citation, and filesystem integrity regression tests."""
 
 import asyncio
-import json
 from pathlib import Path
 
 import pytest

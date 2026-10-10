@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openai import OpenAI
 import json
 import re
 from types import SimpleNamespace
@@ -21,7 +24,7 @@ class XWikiLLM:
 
     def __init__(self, config: XWikiConfig) -> None:
         self._config = config
-        self._client = None
+        self._client: OpenAI | None = None
 
     @property
     def has_credentials(self) -> bool:

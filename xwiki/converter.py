@@ -6,7 +6,6 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List
 
 from .images import strip_embedded_base64_images
 

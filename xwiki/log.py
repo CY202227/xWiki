@@ -38,7 +38,6 @@ class XWikiEventLog:
             handle.write(line)
 
     def append_report(self, report: Dict[str, Any], filename: str) -> None:
-        now = datetime.now().strftime("%Y%m%d_%H%M%S")
         report_path = filename if str(filename).endswith(".md") else f"{filename}.md"
         path = self._log_path.parent / "reports" / report_path
         path.parent.mkdir(parents=True, exist_ok=True)

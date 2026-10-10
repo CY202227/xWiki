@@ -226,11 +226,11 @@ class EntityStore:
                 conn.commit()
             except BaseException:
                 conn.rollback()
-                for target, before in reversed(originals):
-                    if before is None:
+                for target, original_text in reversed(originals):
+                    if original_text is None:
                         target.unlink(missing_ok=True)
                     else:
-                        atomic_write(target, before)
+                        atomic_write(target, original_text)
                 raise
         return results
 

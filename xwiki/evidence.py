@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,7 +44,7 @@ async def verify_operation(llm, operation, contexts: list[str] | None = None) ->
         for item, context in zip(evidence, contexts):
             item["context"] = context
     locators = {(item["document_id"], item["page_no"]) for item in evidence}
-    claims = []
+    claims: list[dict[str, Any]] = []
     seen = set()
     units = [("summary", operation.summary), *[("heading" if line.lstrip().startswith("#") else "body", line) for line in operation.body.splitlines()]]
     for kind, line in units:

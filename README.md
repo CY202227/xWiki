@@ -377,3 +377,17 @@ pytest
 
 Tests use temporary workspace fixtures, so they do not depend on your local production
 workspace data.
+# 自动质量检查
+
+每次推送和 PR 都运行 CI：Windows/Linux 的 Python 3.10、3.14 测试，最低 80% 语句覆盖率，以及 Ruff、完整包的基础类型检查、构建内容审计和独立 wheel 安装检查。CI 不需要模型密钥，使用离线及模拟模型测试；真实模型评估仍单独运行。
+
+本地复现：
+
+```bash
+python -m pip install ".[test,quality,build]"
+python -m ruff check xwiki scripts tests
+python -m mypy
+python -m pytest -q --cov=xwiki --cov-report=term-missing --cov-report=xml
+python -m build
+python scripts/check_distributions.py dist
+```
