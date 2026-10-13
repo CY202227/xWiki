@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - run: python -m pip install ".[test,quality]"
+      - run: python -m pip install ".[test,quality,documents,document-test]"
       - run: python -m pip check
       - run: python -m pytest -q --cov=xwiki --cov-report=term-missing --cov-report=xml
       - run: python scripts/demo_wiki.py

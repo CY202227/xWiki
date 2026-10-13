@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TD
     Host[宿主界面 / 后端 / 调度器] --> Service[XWikiService / JSON CLI]
-    Inbox[Markdown / TXT 收件箱] --> Convert[MarkdownConverter]
+    Inbox[Markdown / TXT / 文本 PDF / DOCX 收件箱] --> Convert[MarkdownConverter / 可选 MarkItDown]
     Convert --> Archive[原文归档]
     Archive --> Index[SourceIndexer]
     Index --> DB[(SQLite 权威存储)]
@@ -22,7 +22,7 @@ flowchart TD
     Queue --> Plan
     Plan --> LLM
     Evidence --> LLM
-    Service --> Lifecycle[来源更新 / 撤回 / 替代]
+    Service --> Lifecycle[来源更新 / 去重 / 撤回 / 替代 / 删除]
     Lifecycle --> DB
     Lifecycle --> Review[受影响页面进入审查]
     Review --> Queue

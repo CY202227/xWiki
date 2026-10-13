@@ -105,7 +105,7 @@ class XWikiService:
         # Cleanup mode also preserves failed or unprocessed inputs.
         self.workspace.ensure()
         started = datetime.now().isoformat()
-        files = list(self.workspace.iter_inbox_files({"md", "txt"}))
+        files = list(self.workspace.iter_inbox_files({"md", "txt", "pdf", "docx"}))
         stats: dict[str, Any] = {"added": 0, "skipped": 0, "failed": 0, "errors": []}
         for file in files:
             if file.is_symlink():
@@ -116,10 +116,18 @@ class XWikiService:
                 parsed = self.converter.parse_file(file)
                 with self.db.connection() as conn:
                     duplicate = conn.execute(
-                        "SELECT raw_path FROM xwiki_documents WHERE content_hash=? AND processor_version=?",
-                        (parsed.content_hash, self.indexer.processor_version),
+                        "SELECT raw_path, status, processor_version FROM xwiki_documents WHERE content_hash=? "
+                        "ORDER BY CASE status WHEN 'indexed' THEN 0 ELSE 1 END LIMIT 1",
+                        (parsed.content_hash,),
                     ).fetchone()
+                    historical = conn.execute("SELECT 1 FROM xwiki_source_versions WHERE content_hash=? LIMIT 1", (parsed.content_hash,)).fetchone()
+                if duplicate is None and historical:
+                    raise ValueError("Content belongs to a historical source version; automatic reintroduction is blocked")
                 if duplicate:
+                    if duplicate["status"] != "indexed":
+                        raise ValueError("Content belongs to an inactive source; automatic reintroduction is blocked")
+                    if duplicate["processor_version"] != self.indexer.document_version(parsed):
+                        raise ValueError("Content already indexed with another processor; use update-source to refresh it")
                     existing = Path(duplicate["raw_path"])
                     if existing.is_symlink() or not existing.is_file() or self.converter.parse_file(existing).content_hash != parsed.content_hash:
                         duplicate = None
@@ -127,10 +135,12 @@ class XWikiService:
                     stats["skipped"] += 1
                 else:
                     raw = self._move_to_raw(file)
-                    archived = replace(self.converter.parse_file(raw), source_path=file, title=parsed.title)
+                    if raw.read_bytes() != initial:
+                        raise ValueError("Archived bytes differ from the original input")
+                    archived = replace(parsed, document_id=self.converter.build_document_id(raw), raw_path=raw)
                     if archived.content_hash != parsed.content_hash:
                         raise ValueError("Source changed while being archived")
-                    await self.indexer.index(archived)
+                    await self.indexer.index(archived, reject_duplicate=True)
                     stats["added"] += 1
                 if file.read_bytes() == initial:
                     file.unlink()
@@ -225,14 +235,56 @@ class XWikiService:
             rows = conn.execute(
                 "SELECT d.document_id, d.title, d.raw_path, d.content_hash, d.status AS source_status, s.status, s.error "
                 "FROM xwiki_documents d LEFT JOIN xwiki_compile_state s ON d.document_id=s.document_id "
-                "WHERE (? IS NULL OR s.status=?) ORDER BY d.document_id LIMIT ? OFFSET ?",
-                (status, status, limit, offset),
+                "WHERE (? IS NULL OR d.status=? OR s.status=?) ORDER BY d.document_id LIMIT ? OFFSET ?",
+                (status, status, status, limit, offset),
             ).fetchall()
         return [dict(row) for row in rows]
 
     def transition_source(self, document_id: str, **kwargs: Any) -> dict:
         from .sources import SourceLifecycle
         return SourceLifecycle(self.db).transition(document_id, **kwargs)
+
+    def delete_source(self, document_id: str, **kwargs: Any) -> dict:
+        from .sources import SourceLifecycle
+        return SourceLifecycle(self.db).transition(document_id, delete=True, **kwargs)
+
+    async def update_source(self, document_id: str, input_path: str | Path, *, expected_hash: str,
+                            reason: str, preview: bool = False) -> dict:
+        """Explicitly update a source identity from an inbox file, preserving old evidence."""
+        from .entities import WikiConflictError
+        if not expected_hash or not reason.strip() or len(reason) > 1000:
+            raise ValueError("Expected source hash and a reason of 1-1000 characters are required")
+        path = Path(input_path).absolute()
+        if path.is_symlink() or path.resolve().parent != self.workspace.paths.inbox_dir.resolve():
+            raise ValueError("Update input must be a regular file directly in this workspace inbox")
+        if path.suffix.lower() not in {".md", ".txt", ".pdf", ".docx"}:
+            raise ValueError("Unsupported source format")
+        with self.db.connection() as conn:
+            current = conn.execute("SELECT * FROM xwiki_documents WHERE document_id=?", (document_id,)).fetchone()
+            if current is None or current["content_hash"] != expected_hash or current["status"] != "indexed":
+                raise WikiConflictError("Update requires the current hash of an active source")
+        initial = path.read_bytes()
+        parsed = self.converter.parse_file(path)
+        with self.db.connection() as conn:
+            duplicate = conn.execute("SELECT document_id FROM xwiki_documents WHERE content_hash=? AND document_id!=?",
+                                     (parsed.content_hash, document_id)).fetchone()
+            historical = conn.execute("SELECT 1 FROM xwiki_source_versions WHERE content_hash=? AND document_id!=? LIMIT 1",
+                                      (parsed.content_hash, document_id)).fetchone()
+            affected = [row[0] for row in conn.execute("SELECT entity_name FROM xwiki_entity_links WHERE document_id=?", (document_id,))]
+        if duplicate or historical:
+            raise ValueError("Content already belongs to another source; use an explicit replacement relationship")
+        result = {"document_id": document_id, "previous_hash": expected_hash, "content_hash": parsed.content_hash,
+                  "affected_pages": affected, "preview": preview, "history_preserved": True}
+        if preview:
+            return result
+        raw = self._move_to_raw(path)
+        if raw.read_bytes() != initial:
+            raise ValueError("Archived bytes differ from the original input")
+        await self.indexer.index(replace(parsed, document_id=document_id, raw_path=raw),
+                                 expected_hash=expected_hash, reason=reason, reject_duplicate=True)
+        if path.read_bytes() == initial:
+            path.unlink()
+        return result
 
     def source_history(self, document_id: str) -> list[dict]:
         from .sources import SourceLifecycle

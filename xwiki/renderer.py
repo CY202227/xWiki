@@ -64,7 +64,10 @@ def render_entity_markdown(entity: dict, report: str | None = None) -> str:
     if citations:
         lines.extend(["", "## 原文证据", ""])
         for citation in citations:
-            lines.append(f"- [{citation['document_id']} p.{citation['page_no']}] {citation['quote']}")
+            locator = citation.get("locator", {})
+            prefix = locator.get("citation_prefix", "p")
+            label = f" ({locator['label']})" if locator.get("label") else ""
+            lines.append(f"- [{citation['document_id']} {prefix}.{citation['page_no']}]{label} {citation['quote']}")
     return "\n".join(lines).strip() + "\n"
 
 

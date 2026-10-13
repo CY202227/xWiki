@@ -104,7 +104,7 @@ class EntityStore:
             if citation.document_id not in sources:
                 raise ValueError("Citation must refer to a declared source")
             page = conn.execute(
-                "SELECT p.content, d.content_hash FROM xwiki_pages p "
+                "SELECT p.content, p.locator_json, d.content_hash FROM xwiki_pages p "
                 "JOIN xwiki_documents d ON p.document_id = d.document_id "
                 "WHERE p.document_id = ? AND p.page_no = ?",
                 (citation.document_id, citation.page_no),
@@ -114,11 +114,20 @@ class EntityStore:
             if citation.content_hash and citation.content_hash != page["content_hash"]:
                 raise ValueError("Citation source changed; reread the source")
             citation.content_hash = page["content_hash"]
+            locator = json.loads(page["locator_json"])
+            if citation.locator and citation.locator != locator:
+                raise ValueError("Citation locator does not match original source metadata")
+            citation.locator = locator
             payload = citation.model_dump()
             if payload not in citations:
                 citations.append(payload)
         entity["source_links_json"] = json.dumps(sources, ensure_ascii=False)
         entity["citations_json"] = json.dumps(citations, ensure_ascii=False)
+        from .agent.query import normalize_citations
+        locators = {(item["document_id"], item["page_no"]) for item in citations}
+        markers = {(item["document_id"], item["page_no"]): item["locator"].get("citation_prefix", "p") for item in citations}
+        for field in ("body", "consensus_summary", "summary"):
+            entity[field], _ = normalize_citations(entity.get(field, ""), locators, markers)
         return entity
 
     def _target(self, conn, entity: dict, previous: dict | None) -> Path:

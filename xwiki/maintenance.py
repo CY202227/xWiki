@@ -24,7 +24,7 @@ def now() -> datetime:
 
 def knowledge_sentences(body: str) -> list[str]:
     """Conservative factual-text guard, independent of model judgement."""
-    body = re.sub(r"\[[^\[\]\s]+\s+(?:p\.)?\d+\]", "", body)
+    body = re.sub(r"\[[^\[\]\s]+\s+(?:[ps]\.)?\d+\]", "", body)
     lines = [line for line in body.splitlines() if not line.lstrip().startswith("#")]
     fragments = re.split(r"[。！？!?;；\n]+", "\n".join(lines))
     return [text for fragment in fragments if len(text := re.sub(r"[\s*`_>#\-]+", "", fragment)) >= 8]
@@ -152,7 +152,7 @@ class WikiMaintainer:
         self.queue = MaintenanceQueue(service.db)
 
     def scan(self) -> None:
-        for file in self.service.workspace.iter_inbox_files({"md", "txt"}):
+        for file in self.service.workspace.iter_inbox_files({"md", "txt", "pdf", "docx"}):
             if not file.is_symlink():
                 self.queue.enqueue("source", file.name, hashlib.sha256(file.read_bytes()).hexdigest())
         offset = 0
@@ -182,12 +182,16 @@ class WikiMaintainer:
                 raise WikiConflictError("Inbox source changed; rescan before processing")
             source = self.service.converter.parse_file(path)
             with self.service.db.connection() as conn:
-                existing = conn.execute("SELECT document_id FROM xwiki_documents WHERE content_hash=?", (source.content_hash,)).fetchone()
+                existing = conn.execute("SELECT document_id, status FROM xwiki_documents WHERE content_hash=? "
+                                        "ORDER BY CASE status WHEN 'indexed' THEN 0 ELSE 1 END LIMIT 1", (source.content_hash,)).fetchone()
+                historical = conn.execute("SELECT 1 FROM xwiki_source_versions WHERE content_hash=? LIMIT 1", (source.content_hash,)).fetchone()
+            if (existing and existing["status"] != "indexed") or (not existing and historical):
+                raise ValueError("Inactive or historical source cannot be reintroduced automatically")
             source_id = existing[0] if existing else hashlib.sha256(("source:" + source.content_hash).encode()).hexdigest()[:32]
             source = replace(source, document_id=source_id)
             context["source"] = {"document_id": source_id, "title": source.title,
                                  "content_hash": source.content_hash,
-                                 "pages": [{"page_no": page.page_no, "content": page.content} for page in source.pages]}
+                                 "pages": [{"page_no": page.page_no, "content": page.content, "locator": page.locator} for page in source.pages]}
             if len(json.dumps(context, ensure_ascii=False)) > 16000:
                 raise ValueError("Source exceeds the small-model maintenance budget; split it before processing")
             query = (source.title + " " + " ".join(page.content for page in source.pages))[:500]
@@ -239,7 +243,8 @@ class WikiMaintainer:
                 "增量更新必须逐字保留旧正文中的事实句和旧引用，可调整标题、排版并增加新段落。"
                 "矛盾来源必须并列说明，不能替换或删除旧说法；需要删除或改写旧事实时返回空操作并说明需要人工确认。"
                 "输出完整 Markdown body、短摘要 summary、修改理由 reason，sources 列出支持文档ID，"
-                "citations 使用实际 document_id、page_no、逐字 quote。每条核心结论写 [document_id p.page_no]。"
+                "citations 使用实际 document_id、page_no、逐字 quote。每条核心结论写 [document_id p.page_no]；"
+                "来源locator.citation_prefix=s时写 [document_id s.page_no]，DOCX块编号不是物理页码。"
                 "update 的 page_id 和 title 必须来自已阅读页面；related 只用现有页面ID。"
                 "没有原文支持时不要猜测。禁止删除、合并或重命名。只返回符合结构的 JSON。"
             )}, {"role": "user", "content": payload},
@@ -384,7 +389,7 @@ class WikiMaintainer:
                     from .llm import XWikiLLM
                     offline = XWikiLLM(replace(self.service.config, llm_api_key=""))
                     indexer = SourceIndexer(self.service.converter, self.service.db, offline, self.service.state, self.service.config)
-                    await indexer.index_all([archived])
+                    await indexer.index_all([archived], reject_duplicate=True)
                 result = self.service.entities.apply(changes, plan.reason) if changes else []
                 if state["source"] and plan.retain_source:
                     path = self.service.workspace.paths.inbox_dir / task["subject"]

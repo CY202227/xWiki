@@ -174,7 +174,7 @@ class XWikiSearcher:
     def document_passages(self, document_id: str, tokens: list[str], limit: int = 2) -> list[dict]:
         with self._db.connection() as conn:
             rows = conn.execute(
-                "SELECT p.page_no, p.content, d.content_hash FROM xwiki_pages p JOIN xwiki_documents d "
+                "SELECT p.page_no, p.content, p.locator_json, d.content_hash FROM xwiki_pages p JOIN xwiki_documents d "
                 "ON p.document_id=d.document_id WHERE p.document_id=? AND d.status='indexed' ORDER BY p.page_no", (document_id,),
             ).fetchall()
         ranked = sorted(rows, key=lambda row: -sum(token in row["content"].casefold() for token in tokens))
@@ -183,7 +183,7 @@ class XWikiSearcher:
             content = row["content"]
             positions = [content.casefold().find(token) for token in tokens if token in content.casefold()]
             start = max(0, (min(positions) if positions else 0) - 150)
-            passages.append({"document_id": document_id, "page_no": row["page_no"], "content": content[start:start + 1500], "content_hash": row["content_hash"]})
+            passages.append({"document_id": document_id, "page_no": row["page_no"], "content": content[start:start + 1500], "content_hash": row["content_hash"], "locator": json.loads(row["locator_json"])})
         return passages
 
     def read_pages(self, document_id: str, page_nos: list[int]) -> str:
@@ -195,14 +195,14 @@ class XWikiSearcher:
         placeholders = ",".join(["?"] * len(page_nos))
         with self._db.connection() as conn:
             rows = conn.execute(
-                f"SELECT page_no, content FROM xwiki_pages WHERE document_id = ? "
+                f"SELECT page_no, content, locator_json FROM xwiki_pages WHERE document_id = ? "
                 f"AND page_no IN ({placeholders}) ORDER BY page_no",
                 (document_id, *page_nos),
             ).fetchall()
             if len(rows) != len(page_nos):
                 raise ValueError("Source document or requested pages do not exist")
             return "\n\n".join(
-                [f"--- Page {row['page_no']} ---\n{row['content']}" for row in rows]
+                [f"--- {json.loads(row['locator_json']).get('label', 'Page ' + str(row['page_no']))} ---\n{row['content']}" for row in rows]
             )
 
     def get_entity_evidence(self, entity_name: str, limit: int = 3) -> Dict[str, Any]:
@@ -233,9 +233,9 @@ class XWikiSearcher:
             citations = json.loads(result.get("citations_json") or "[]")
             verified = []
             for citation in citations:
-                page = conn.execute("SELECT p.content, d.content_hash, d.status FROM xwiki_pages p JOIN xwiki_documents d ON p.document_id=d.document_id WHERE p.document_id=? AND p.page_no=?",
+                page = conn.execute("SELECT p.content, p.locator_json, d.content_hash, d.status FROM xwiki_pages p JOIN xwiki_documents d ON p.document_id=d.document_id WHERE p.document_id=? AND p.page_no=?",
                                     (citation["document_id"], citation["page_no"])).fetchone()
-                verified.append({**citation, "source_status": page["status"] if page else "missing", "valid": bool(page and page["status"] == "indexed" and citation["quote"] in page["content"] and citation.get("content_hash") == page["content_hash"])})
+                verified.append({**citation, "locator": json.loads(page["locator_json"]) if page else {}, "source_status": page["status"] if page else "missing", "valid": bool(page and page["status"] == "indexed" and citation["quote"] in page["content"] and citation.get("content_hash") == page["content_hash"])})
             result["citations"] = verified
             result["wiki_consensus"] = result.pop("consensus_summary")
             return result
