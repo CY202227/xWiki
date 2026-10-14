@@ -1,7 +1,11 @@
 # xWiki
 
+English | [简体中文](README.zh-CN.md)
+
 XWiki is a small Wiki maintained with model assistance, with full articles,
 traceable evidence and recoverable history. It is distributed under the [MIT license](LICENSE).
+
+Supporting documents below are currently written in Chinese.
 
 - [Product scope and current limits](docs/scope.md)
 - [Architecture and execution paths](docs/architecture.md)
@@ -12,7 +16,6 @@ traceable evidence and recoverable history. It is distributed under the [MIT lic
 - [Source updates, deduplication and deletion](docs/source-lifecycle.md)
 - [Technical proposal](docs/technical-proposal.md)
 - [Implementation walkthrough](docs/implementation.md)
-- [Interview questions and answers](docs/interview-guide.md)
 
 The main entrypoint is
 `XWikiService`, designed for FastAPI backends, notebooks, task runners, and other
@@ -145,13 +148,13 @@ python -m xwiki --workspace data/my_kb ingest
 python -m xwiki --workspace data/my_kb compile
 python -m xwiki --workspace data/my_kb sources --status failed
 python -m xwiki --workspace data/my_kb list --limit 20
-python -m xwiki --workspace data/my_kb search "碳排放"
-python -m xwiki --workspace data/my_kb search "碳排放" --kind documents
-python -m xwiki --workspace data/my_kb read "碳排放"
+python -m xwiki --workspace data/my_kb search "Carbon emissions"
+python -m xwiki --workspace data/my_kb search "Carbon emissions" --kind documents
+python -m xwiki --workspace data/my_kb read "Carbon emissions"
 python -m xwiki --workspace data/my_kb read-source DOCUMENT_ID 1 2
 python -m xwiki --workspace data/my_kb update --input change.json --preview
 python -m xwiki --workspace data/my_kb update --input change.json
-python -m xwiki --workspace data/my_kb revisions "碳排放"
+python -m xwiki --workspace data/my_kb revisions "Carbon emissions"
 python -m xwiki --workspace data/my_kb lint
 ```
 
@@ -159,15 +162,15 @@ An update JSON file contains:
 
 ```json
 {
-  "name": "碳排放",
-  "content": "来源支持的定义与条件 [DOCUMENT_ID p.1]",
+  "name": "Carbon emissions",
+  "content": "Source-supported definition and conditions [DOCUMENT_ID p.1]",
   "base_version": "VERSION_RETURNED_BY_READ",
-  "reason": "根据新增来源补充适用条件",
-  "domain": "环境",
-  "attributes": {"适用条件": "原文支持的条件"},
+  "reason": "Add conditions supported by the new source",
+  "domain": "Environment",
+  "attributes": {"Conditions": "Conditions supported by the source"},
   "sources": ["DOCUMENT_ID"],
   "citations": [
-    {"document_id": "DOCUMENT_ID", "page_no": 1, "quote": "逐字原文片段"}
+    {"document_id": "DOCUMENT_ID", "page_no": 1, "quote": "Verbatim source passage"}
   ]
 }
 ```
@@ -178,7 +181,7 @@ the update and returns a diff without writing an entity or revision. Rollback
 creates another revision and revalidates its citations:
 
 ```bash
-python -m xwiki --workspace data/my_kb rollback "碳排放" REVISION_ID --base-version CURRENT_VERSION --reason "恢复经核验的旧版"
+python -m xwiki --workspace data/my_kb rollback "Carbon emissions" REVISION_ID --base-version CURRENT_VERSION --reason "Restore the verified earlier version"
 ```
 
 The Python equivalents are `read_entity`, `update_entity`, `entity_revisions`,
@@ -225,10 +228,10 @@ compatible; database startup upgrades existing records in place.
 
 ```python
 created = service.update_page(
-    "雨水收集", "## 用途\n收集屋顶雨水。", summary="雨水收集的方法与维护",
-    base_version=None, reason="建立文章",
+    "Rainwater collection", "## Purpose\nCollect rainwater from the roof.", summary="Rainwater collection methods and maintenance",
+    base_version=None, reason="Create article",
 )
-page = service.read_page("雨水收集")  # Also accepts its stable page ID.
+page = service.read_page("Rainwater collection")  # Also accepts its stable page ID.
 cards = service.page_cards(limit=20)
 links = service.page_links(page["page"]["id"])
 ```
@@ -243,7 +246,7 @@ article-oriented, model-decided workflow.
 python -m xwiki --workspace data/my_kb maintain --limit 2 --preview
 python -m xwiki --workspace data/my_kb maintain --limit 2
 python -m xwiki --workspace data/my_kb tasks
-python -m xwiki --workspace data/my_kb read-page "雨水收集"
+python -m xwiki --workspace data/my_kb read-page "Rainwater collection"
 python -m xwiki --workspace data/my_kb write-page --input article.json --preview
 ```
 
@@ -391,15 +394,15 @@ pytest
 
 Tests use temporary workspace fixtures, so they do not depend on your local production
 workspace data.
-# 自动质量检查
+## Quality checks
 
-来源更新与撤回支持影响追踪、审查任务及历史保留，详见 [来源生命周期](docs/source-lifecycle.md)。
+Source updates and withdrawals track affected articles, review tasks and retained history. See [Source lifecycle](docs/source-lifecycle.md) (Chinese).
 
-公开示例见 [虚构社区花园](examples/garden/README.md)。运行 `python scripts/demo_wiki.py` 可离线复现来源摄取、文章增量维护、引用校验、检索、冷却和回滚，并保存 JSON 报告。模拟维护器的结果不代表真实模型成绩。
+See the [synthetic community garden](examples/garden/README.md) (Chinese). Run `python scripts/demo_wiki.py` to replay ingestion, incremental article maintenance, citation validation, retrieval, cooling and rollback offline, and save a JSON report. The scripted maintainer does not measure real-model quality.
 
-每次推送和 PR 都运行 CI：Windows/Linux 的 Python 3.10、3.14 测试，最低 80% 语句覆盖率，以及 Ruff、完整包的基础类型检查、构建内容审计和独立 wheel 安装检查。CI 不需要模型密钥，使用离线及模拟模型测试；真实模型评估仍单独运行。
+Pushes and pull requests run CI on Windows/Linux with Python 3.10 and 3.14, with at least 80% statement coverage, Ruff, basic package-wide type checks, distribution audits and isolated wheel installation checks. CI uses offline and simulated-model tests without model credentials; real-model evaluations run separately.
 
-本地复现：
+Run locally:
 
 ```bash
 python -m pip install ".[test,quality,build]"
